@@ -63,7 +63,7 @@ static ringbuf_t pcmRing;
 
 static dsm_t dsmLeft, dsmRight;
 
-static uint32_t previousPcmLeft, previousPcmRight;
+static int16_t lastPcmLeft, lastPcmRight;
 
 auto_init_mutex(pcmMutex);
 
@@ -143,6 +143,7 @@ static void core1_worker(void)
                 ringbuf_clear(&pioRingL);
                 ringbuf_clear(&pioRingR);
                 refillBuffers = true;
+                lastPcmLeft = lastPcmRight = 0;
 
                 hbridge_program_start(PIO, SM_LEFT);
             }
@@ -188,11 +189,16 @@ static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool doNo
     //return true;
 ////////////
 
-    if (!success)
+    if (success)
+    {
+        lastPcmLeft = (int16_t)(pcmStereoSample & 0xFFFF);
+        lastPcmRight = (int16_t)(pcmStereoSample >> 16);
+    } 
+    else if (doNotRepeatPrevious)
         return false;
 
     //only left for now
-    *outSampleL = dsm_process_sample(&dsmLeft, (int16_t)(pcmStereoSample & 0xFFFF));
+    *outSampleL = dsm_process_sample(&dsmLeft, lastPcmLeft);
 
     return true;
 }
