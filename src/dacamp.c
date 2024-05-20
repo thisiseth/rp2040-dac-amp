@@ -14,21 +14,56 @@
 #define PIO         pio0
 #define SM_LEFT     0
 #define SM_RIGHT    1
-                                  //6789 67 & 89 GPIO should be paralleled for more drive current
-#define HBRIDGE_LEFT_START_PIN  6 //++--
 
-#define PIO_TX_FIFO_DEPTH       8
-#define PIO_RING_BUFFER_DEPTH   32 //allow buffering of up to N processed pio samples, should be at least PIO_TX_FIFO_DEPTH in size
+//  to drive the output i wired a simple H-bridge using
+// Si2302 N-MOSFETs and Si2305 P-MOSFETs
+// total of 2 N-MOSFETS and 1 P-MOSFET per side, 6 total per bridge
+// 
+// P-MOSFETs are drived through an N-MOSFET and a 100 ohm pullup to get fast enough switch-off, 
+// though each pullup heats a lot
+// N-MOSFETs have ~10k pulldowns, doesn't matter much, since GPIOs are push-pull
+// no gate resistors since we are already severely limited by 12mA per GPIO 
+//
+//  my mosfet H-bridge wiring is:
+// L-  H+ L+  H-, where L is low side and H is high side
+// |___|  |___|   + and - are output pins
+//   |      |     and MOSFET gates are cross-tied together 
+//   B+     B-    for wiring simplicity
+//
+// so following bridge inputs result in:
+// B+ B-
+// 1  0: +5v
+// 0  1: -5v
+// 0  0: not voltage applied / dead time
+// 1  1: short everything out and blow up the transistors, don't do that
+//
+//  the GPIO mapping is 
+// note that this pins should be paralleled together to get as much drive current as possible
+// so the PIO output is 0b1111_0000, 0b0000_1111 or 0b0000_0000
+// Left channel bridge
+// bridge  B+           B-
+// GPIO    6,7,8,9      10,11,12,13
+//
+// Right channel bridge (reserved for, but not implemented yet)
+// bridge  B+           B-
+// GPIO    14,15,16,17  18,19,20,21
 
-#define PCM_RING_BUFFER_DEPTH   8192
+#define HBRIDGE_LEFT_START_PIN  6 // PIO takes first pin and assumes other pins are in succession
+#define HBRIDGE_RIGHT_START_PIN 14
+
+#define PIO_TX_FIFO_DEPTH 8
+#define PIO_RING_BUFFER_DEPTH 32 //allow buffering of up to N processed pio samples, should be at least PIO_TX_FIFO_DEPTH in size
+
+#define PCM_RING_BUFFER_DEPTH 8192
 
 static volatile bool isEnabledRequested;
 
 static uint32_t pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH];
 static ringbuf_t pcmRing;
 
-static dsm_t dsmLeft;
-static dsm_t dsmRight;
+static dsm_t dsmLeft, dsmRight;
+
+static uint32_t previousPcmLeft, previousPcmRight;
 
 auto_init_mutex(pcmMutex);
 
@@ -137,7 +172,7 @@ static void core1_worker(void)
     }
 }
 
-static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool allowRepeatPrevious)
+static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool doNotRepeatPrevious)
 {
     uint32_t pcmStereoSample;
 
@@ -147,24 +182,17 @@ static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool allo
 
     mutex_exit(&pcmMutex);
 
+////////////
+    //*outSampleL = 0b10101010110011001111000111111110;
+    //*outSampleL = 0b10101010101010101010101010101010;
+    //return true;
+////////////
+
     if (!success)
         return false;
 
-    //test: take L
-    //*outSample = 0b10101010101010101010101010101010;
+    //only left for now
     *outSampleL = dsm_process_sample(&dsmLeft, (int16_t)(pcmStereoSample & 0xFFFF));
-
-// #include <math.h>
-
-//     static int16_t saw = 0;
-//     static bool dir = 0;
-
-//     if (saw >= 20000 | saw <= -20000)
-//         dir = !dir;
-
-//     saw += dir ? 1000 : -1000;
-
-//     *outSampleL = dsm_process_sample(&dsmLeft, (int16_t)(saw));
 
     return true;
 }
