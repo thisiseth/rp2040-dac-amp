@@ -63,7 +63,7 @@
 
 static volatile bool isEnabledRequested;
 
-static uint32_t __aligned(4) pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH];
+static uint32_t pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH] __aligned(4);
 static ringbuf_t pcmRing;
 
 static dsm_t dsmLeft, dsmRight;
@@ -134,7 +134,7 @@ static void core1_worker(void)
     bool isEnabledActual = false;
     bool refillBuffers = false;
 
-    uint64_t __aligned(4) pioRingInternalBuf[PIO_RING_BUFFER_DEPTH];
+    uint64_t pioRingInternalBuf[PIO_RING_BUFFER_DEPTH] __aligned(4);
     ringbuf_t pioRing;
 
     ringbuf_init(&pioRing, pioRingInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint64_t));

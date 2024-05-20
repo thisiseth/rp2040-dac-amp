@@ -80,7 +80,7 @@ int8_t mute[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master channel
 int16_t volume[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1]; // +1 for master channel 0
 
 // Buffer for speaker data
-int32_t __aligned(4) spk_buf[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ / 4];
+int32_t spk_buf[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ / 4] __aligned(4);
 // Speaker data size received in the last frame
 int spk_data_size;
 // Resolution per format
@@ -380,47 +380,10 @@ bool tud_audio_rx_done_pre_read_cb(uint8_t rhport, uint16_t n_bytes_received, ui
 
 void audio_task(void)
 {
-    // When new data arrived, copy data from speaker buffer, to microphone buffer
-    // and send it over
-    // Only support speaker & headphone both have the same resolution
-    // If one is 16bit another is 24bit be care of LOUD noise !
     if (spk_data_size)
     {
         int ret = dacamp_pcm_put(spk_buf, spk_data_size / 4);
         spk_data_size = 0;
-        
-        //blink_interval_ms = ret;
-
-        // if (current_resolution == 16)
-        // {
-        //     int16_t *src = (int16_t *)spk_buf;
-        //     int16_t *limit = (int16_t *)spk_buf + spk_data_size / 2;
-        //     // int16_t *dst = (int16_t*)mic_buf;
-        //     while (src < limit)
-        //     {
-        //         // Combine two channels into one
-        //         int32_t left = *src++;
-        //         int32_t right = *src++;
-        //         //*dst++ = (int16_t) ((left >> 1) + (right >> 1));
-        //     }
-        //     // tud_audio_write((uint8_t *)mic_buf, (uint16_t) (spk_data_size / 2));
-        //     spk_data_size = 0;
-        // }
-        // else if (current_resolution == 24)
-        // {
-        //     int32_t *src = spk_buf;
-        //     int32_t *limit = spk_buf + spk_data_size / 4;
-        //     // int32_t *dst = mic_buf;
-        //     while (src < limit)
-        //     {
-        //         // Combine two channels into one
-        //         int32_t left = *src++;
-        //         int32_t right = *src++;
-        //         //*dst++ = (int32_t) ((uint32_t) ((left >> 1) + (right >> 1)) & 0xffffff00ul);
-        //     }
-        //     // tud_audio_write((uint8_t *)mic_buf, (uint16_t) (spk_data_size / 2));
-        //     spk_data_size = 0;
-        // }
     }
 }
 
