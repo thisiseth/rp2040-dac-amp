@@ -76,7 +76,6 @@ uint8_t const * tud_descriptor_device_cb(void)
 //--------------------------------------------------------------------+
 #define CONFIG_TOTAL_LEN    	(TUD_CONFIG_DESC_LEN + CFG_TUD_AUDIO * TUD_AUDIO_DAC_AMP_STEREO_DESC_LEN)
 
-#define EPNUM_AUDIO_IN    0x01
 #define EPNUM_AUDIO_OUT   0x01
 
 uint8_t const desc_configuration[] =
