@@ -8,14 +8,14 @@
 
 #include "hbridge.pio.h"
 #include "ringbuf.h"
-#include "dsm.h"
 
+#include "dsm.h"
 
 #define PIO         pio0
 #define SM_LEFT     0
 #define SM_RIGHT    1
-                                 //6789 67 & 89 GPIO should be paralleled for more drive current
-#define HBRIDGE_LEFT_START_PIN 6 //++--
+                                  //6789 67 & 89 GPIO should be paralleled for more drive current
+#define HBRIDGE_LEFT_START_PIN  6 //++--
 
 #define PIO_TX_FIFO_DEPTH       8
 #define PIO_RING_BUFFER_DEPTH   32 //allow buffering of up to N processed pio samples, should be at least PIO_TX_FIFO_DEPTH in size
