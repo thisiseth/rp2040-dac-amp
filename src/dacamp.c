@@ -63,7 +63,7 @@
 
 #define PCM_TO_DSM_PCM_BUFFER_LENGTH 256
 
-static volatile bool isEnabledRequested;
+static volatile bool isEnabledRequested = false, isFlushRequested = false;
 
 static uint64_t pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH];
 static ringbuf_t pcmRing;
@@ -78,6 +78,9 @@ static uint64_t pcmToDsmPcmBuffer[PCM_TO_DSM_PCM_BUFFER_LENGTH];
 
 #define _DACAMP_PCM16_LEFT(pcm)         ((int16_t)(pcm))
 #define _DACAMP_PCM16_RIGHT(pcm)        ((int16_t)((pcm) >> 16))
+ 
+#define _DACAMP_PCM24_LEFT(pcm)         (((int32_t)(pcm)) >> 8)
+#define _DACAMP_PCM24_RIGHT(pcm)        ((int32_t)((pcm) >> 32) >> 8)
 
 #define _DACAMP_DSM_PCM_LEFT(pcm)       ((int32_t)(pcm))
 #define _DACAMP_DSM_PCM_RIGHT(pcm)      ((int32_t)((pcm) >> 32))
@@ -118,12 +121,30 @@ void dacamp_stop(void)
     mutex_exit(&pcmMutex);
 }
 
-int dacamp_pcm_put(uint32_t* samples, int sampleCount)
+void dacamp_flush(void)
+{
+    mutex_enter_blocking(&pcmMutex);
+
+    ringbuf_clear(&pcmRing);
+
+    mutex_exit(&pcmMutex);
+
+    isFlushRequested = true;
+}
+
+int dacamp_pcm_put(uint32_t *samples, int sampleCount, int sampleSize)
 {
     if (!isEnabledRequested)
         return sampleCount; //discard
 
     int ret = 0;
+
+    //4-byte uint32_t samples are 2 channels of 16bit pcm
+    //8-byte uint64_t samples are 2 channels of 24bit pcm
+
+    uint64_t *samples64 = (uint64_t*)samples;
+
+    int32_t sampleLeft, sampleRight;
 
     while (sampleCount > 0)
     {
@@ -133,9 +154,18 @@ int dacamp_pcm_put(uint32_t* samples, int sampleCount)
         
         for (int i = 0; i < samplesToWrite; ++i)
         {
-            uint32_t sample = samples[i];
-            int32_t sampleLeft = DSM_INT16_TO_INT32(_DACAMP_PCM16_LEFT(sample)), 
+            if (sampleSize == 4)
+            {
+                uint32_t sample = *(samples++);
+                sampleLeft = DSM_INT16_TO_INT32(_DACAMP_PCM16_LEFT(sample));
                 sampleRight = DSM_INT16_TO_INT32(_DACAMP_PCM16_RIGHT(sample));
+            }
+            else 
+            {
+                uint64_t sample = *(samples64++);
+                sampleLeft = DSM_INT24_TO_INT32(_DACAMP_PCM24_LEFT(sample));
+                sampleRight = DSM_INT24_TO_INT32(_DACAMP_PCM24_RIGHT(sample));
+            }
 
             //volumize
 
@@ -156,7 +186,6 @@ int dacamp_pcm_put(uint32_t* samples, int sampleCount)
             break;
 
         sampleCount -= samplesWritten;
-        samples += samplesWritten;
     }
 
     return ret;
@@ -169,6 +198,7 @@ static void core1_worker(void)
     if (!hbridge_program_init(PIO, SM_LEFT, SM_RIGHT, offset, HBRIDGE_LEFT_START_PIN, HBRIDGE_RIGHT_START_PIN))
         dacamp_panic();
 
+    bool isEnabled;
     bool isEnabledActual = false;
     bool refillBuffers = false;
 
@@ -180,7 +210,7 @@ static void core1_worker(void)
     uint32_t pioSample[2];
 
     while (1) {
-        bool isEnabled = isEnabledRequested;
+        isEnabled = isEnabledRequested;
 
         if (isEnabled != isEnabledActual)
         {
@@ -198,6 +228,24 @@ static void core1_worker(void)
                 hbridge_program_stop(PIO, SM_LEFT, SM_RIGHT);
 
             isEnabledActual = isEnabled;
+            isFlushRequested = false;
+        }
+        else if (isFlushRequested) 
+        {
+            if (isEnabledActual)
+            {
+                hbridge_program_stop(PIO, SM_LEFT, SM_RIGHT);
+
+                dsm_reset(&dsmLeft);
+                dsm_reset(&dsmRight);
+                ringbuf_clear(&pioRing);
+                refillBuffers = true;
+                lastPcm = 0;
+
+                hbridge_program_start(PIO, SM_LEFT, SM_RIGHT);
+            }
+
+            isFlushRequested = false;
         }
 
         if (!isEnabledActual)
@@ -246,7 +294,7 @@ static inline bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bo
     return true;
 }
 
-static void dacamp_panic()
+static void dacamp_panic(void)
 {
     //enable led
     gpio_init(25);

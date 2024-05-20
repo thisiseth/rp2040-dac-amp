@@ -5,6 +5,19 @@
 #include <memory.h>
 #include <stdint.h>
 
+// internally DSM uses 24 bit inputs - +-2^23 * 71% (to prevent overload), 
+//if use more than 24 bits current DSM implementation with 32bit integrators starts to overflow
+//71% is also a result of modelling and running this code locally with test signals 
+
+#define DSM_INT16_TO_INT32(a)       ((((int32_t)(a)) * 45) << 2) //limit modulator input to 45/64= ~71%
+#define DSM_INT24_TO_INT32(a)       ((((int32_t)(a)) * 45) >> 6)
+
+#define _DSM_INT_MAX                (0x7FFF << 8)
+#define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time (?)
+
+#define _DSM_QUANTIZE(a)                ((a) ? _DSM_INT_MAX : (-_DSM_INT_MAX))
+#define _DSM_QUANTIZE_SHORT_PULSE(a)    ((a) ? _DSM_INT_MAX_SHORT_PULSE : (-_DSM_INT_MAX_SHORT_PULSE))
+
 typedef struct dsm
 {
     int32_t prevSample;
@@ -33,13 +46,6 @@ static inline void dsm_reset(dsm_t* ptr)
 {
     dsm_init(ptr);
 }
-
-#define _DSM_INT_MAX                (0x7FFF << 8)
-#define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time
-#define DSM_INT16_TO_INT32(a)      ((((int32_t)(a)) * 45) << 2) //limit modulator input to 45/64= ~71%
-
-#define _DSM_QUANTIZE(a)                ((a) ? _DSM_INT_MAX : (-_DSM_INT_MAX))
-#define _DSM_QUANTIZE_SHORT_PULSE(a)    ((a) ? _DSM_INT_MAX_SHORT_PULSE : (-_DSM_INT_MAX_SHORT_PULSE))
 
 //a = [1, 1/4, 1/16, 1/128];
 //b = [1, 0, 0, 0, 1];

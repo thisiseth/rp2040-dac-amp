@@ -38,7 +38,7 @@
 // List of supported sample rates
 const uint32_t sample_rates[] = {48000 /* 44100, 48000, 88200, 96000*/};
 
-uint32_t current_sample_rate = 48000; // 44100;
+static uint32_t current_sample_rate = 48000; // 44100;
 
 #define N_SAMPLE_RATES TU_ARRAY_SIZE(sample_rates)
 
@@ -76,20 +76,23 @@ static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
 
 // Audio controls
 // Current states
-int8_t mute[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master channel 0
-int16_t volume[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1]; // +1 for master channel 0
+static int8_t mute[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master channel 0
+static int16_t volume[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1]; // +1 for master channel 0
 
 // Buffer for speaker data
-int32_t spk_buf[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ / 4];
+static int32_t spk_buf[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ / 4];
+
 // Speaker data size received in the last frame
-int spk_data_size;
+static int spk_data_size;
+
 // Resolution per format
-const uint8_t resolutions_per_format[CFG_TUD_AUDIO_FUNC_1_N_FORMATS] = {
-    CFG_TUD_AUDIO_FUNC_1_FORMAT_1_RESOLUTION_RX /*,
-     CFG_TUD_AUDIO_FUNC_1_FORMAT_2_RESOLUTION_RX*/
+const uint8_t sampleLengthPerFormat[CFG_TUD_AUDIO_FUNC_1_N_FORMATS] = {
+    CFG_TUD_AUDIO_FUNC_1_FORMAT_1_N_BYTES_PER_SAMPLE_RX * 2,
+    CFG_TUD_AUDIO_FUNC_1_FORMAT_2_N_BYTES_PER_SAMPLE_RX * 2
 };
+
 // Current resolution, update on format change
-uint8_t current_resolution;
+static uint8_t currentSampleLength;
 
 void led_blinking_task(void);
 void audio_task(void);
@@ -102,9 +105,9 @@ int main(void)
     // init device stack on configured roothub port
     tud_init(BOARD_TUD_RHPORT);
 
-    TU_LOG1("Headset running\r\n");
-
     dacamp_init();
+
+    TU_LOG1("Headset running\r\n");
 
     while (1)
     {
@@ -130,6 +133,7 @@ void tud_mount_cb(void)
 void tud_umount_cb(void)
 {
     blink_interval_ms = BLINK_NOT_MOUNTED;
+    dacamp_stop();
 }
 
 // Invoked when usb bus is suspended
@@ -334,7 +338,10 @@ bool tud_audio_set_itf_close_EP_cb(uint8_t rhport, tusb_control_request_t const 
     if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt == 0)
     {
         blink_interval_ms = BLINK_MOUNTED;
+
         dacamp_stop();
+
+        spk_data_size = 0;
     }
 
     return true;
@@ -350,14 +357,13 @@ bool tud_audio_set_itf_cb(uint8_t rhport, tusb_control_request_t const *p_reques
     if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt != 0)
     {
         blink_interval_ms = BLINK_STREAMING;
-        dacamp_start();
-    }
 
-    // Clear buffer when streaming format is changed
-    spk_data_size = 0;
-    if (alt != 0)
-    {
-        current_resolution = resolutions_per_format[alt - 1];
+        currentSampleLength = sampleLengthPerFormat[alt - 1];
+
+        dacamp_flush();
+        dacamp_start();
+
+        spk_data_size = 0;
     }
 
     return true;
@@ -371,6 +377,7 @@ bool tud_audio_rx_done_pre_read_cb(uint8_t rhport, uint16_t n_bytes_received, ui
     (void)cur_alt_setting;
 
     spk_data_size = tud_audio_read(spk_buf, n_bytes_received);
+
     return true;
 }
 
@@ -380,11 +387,12 @@ bool tud_audio_rx_done_pre_read_cb(uint8_t rhport, uint16_t n_bytes_received, ui
 
 void audio_task(void)
 {
-    if (spk_data_size)
+    if (spk_data_size && (currentSampleLength == 4 || currentSampleLength == 8))
     {
-        int ret = dacamp_pcm_put(spk_buf, spk_data_size / 4);
-        spk_data_size = 0;
+        int ret = dacamp_pcm_put(spk_buf, spk_data_size / currentSampleLength, currentSampleLength);
     }
+
+    spk_data_size = 0;
 }
 
 //--------------------------------------------------------------------+
