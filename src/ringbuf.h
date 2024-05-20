@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory.h>
+#include <stdint.h>
 
 typedef struct ringbuf_t
 {
@@ -92,8 +93,11 @@ static bool ringbuf_put_one(ringbuf_t* ptr, const void* element)
     if (ringbuf_is_full(ptr))
         return false;
 
-    for (int i = 0; i < ptr->elementSize; ++i)
-        ptr->buf[ptr->endIdx * ptr->elementSize + i] = ((const char*)element)[i];
+    if (ptr->elementSize == 4)
+        ((uint32_t*)ptr->buf)[ptr->endIdx] = *(uint32_t*)element;
+    else
+        for (int i = 0; i < ptr->elementSize; ++i)
+            ptr->buf[ptr->endIdx * ptr->elementSize + i] = ((const char*)element)[i];
 
     ++ptr->endIdx;
     ptr->isEmpty = false;
@@ -137,14 +141,16 @@ static int ringbuf_get(ringbuf_t* ptr, void* buf, int elementCount)
     return ret;
 }
 
-
 static bool ringbuf_get_one(ringbuf_t* ptr, void* element)
 {
     if (ringbuf_is_empty(ptr))
         return false;
 
-    for (int i = 0; i < ptr->elementSize; ++i)
-        ((char*)element)[i] = ptr->buf[ptr->startIdx * ptr->elementSize + i];
+    if (ptr->elementSize == 4)
+        *(uint32_t*)element = ((uint32_t*)ptr->buf)[ptr->startIdx];
+    else
+        for (int i = 0; i < ptr->elementSize; ++i)
+            ((char*)element)[i] = ptr->buf[ptr->startIdx * ptr->elementSize + i];
 
     ++ptr->startIdx;
 

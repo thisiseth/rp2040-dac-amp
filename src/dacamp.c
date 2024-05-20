@@ -28,11 +28,12 @@ static uint32_t pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH];
 static ringbuf_t pcmRing;
 
 static dsm_t dsmLeft;
+static dsm_t dsmRight;
 
 auto_init_mutex(pcmMutex);
 
 static void core1_worker(void);
-static bool process_sample(uint32_t *outSample);
+static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool allowRepeatPrevious);
 
 void dacamp_init(void)
 {
@@ -65,7 +66,7 @@ void dacamp_stop(void)
     mutex_exit(&pcmMutex);
 }
 
-int dacamp_pcm_put(const uint32_t* samples, int sampleCount)
+int dacamp_pcm_put(uint32_t* samples, int sampleCount)
 {
     if (!isEnabledRequested)
         return sampleCount; //discard
@@ -84,14 +85,16 @@ static void core1_worker(void)
     uint offset = pio_add_program(PIO, &hbridge_program);
     hbridge_program_init(PIO, SM_LEFT, offset, HBRIDGE_LEFT_START_PIN);
 
-    bool isEnabledActual;
-    bool waitFull;
+    bool isEnabledActual = false;
+    bool refillBuffers = false;
 
-    uint32_t pioRingInternalBuf[PIO_RING_BUFFER_DEPTH];
-    ringbuf_t pioRing;
-    ringbuf_init(&pioRing, pioRingInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint32_t));
+    uint32_t pioRingLInternalBuf[PIO_RING_BUFFER_DEPTH], pioRingRInternalBuf[PIO_RING_BUFFER_DEPTH];
+    ringbuf_t pioRingL, pioRingR;
 
-    uint32_t pioSample;
+    ringbuf_init(&pioRingL, pioRingLInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint32_t));
+    ringbuf_init(&pioRingR, pioRingRInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint32_t));
+
+    uint32_t pioSampleL, pioSampleR;
 
     while (1) {
         bool isEnabled = isEnabledRequested;
@@ -101,7 +104,11 @@ static void core1_worker(void)
             if (isEnabled) 
             {
                 dsm_reset(&dsmLeft);
-                ringbuf_clear(&pioRing);
+                dsm_reset(&dsmRight);
+                ringbuf_clear(&pioRingL);
+                ringbuf_clear(&pioRingR);
+                refillBuffers = true;
+
                 hbridge_program_start(PIO, SM_LEFT);
             }
             else 
@@ -113,29 +120,24 @@ static void core1_worker(void)
         if (!isEnabledActual)
             continue;
 
-        //if fifo is near-empty wait until all 8 slots are ready then fill
-        if (pio_sm_get_tx_fifo_level(PIO, SM_LEFT) <= 2) 
-            waitFull = true;
+        if (refillBuffers && ringbuf_is_full(&pioRingL))
+            refillBuffers = false;
 
-        if (!waitFull || ringbuf_filled_slots(&pioRing) >= PIO_TX_FIFO_DEPTH)
-        {
-            waitFull = false;
+        if (!refillBuffers)
+            while (!pio_sm_is_tx_fifo_full(PIO, SM_LEFT) && ringbuf_get_one(&pioRingL, &pioSampleL))
+                pio_sm_put(PIO, SM_LEFT, pioSampleL);
 
-            while (!pio_sm_is_tx_fifo_full(PIO, SM_LEFT) && ringbuf_get_one(&pioRing, &pioSample))
-                pio_sm_put(PIO, SM_LEFT, pioSample);
-        }
-
-        if (!process_sample(&pioSample))
+        if (ringbuf_is_full(&pioRingL))
             continue;
 
-        if (!waitFull && !pio_sm_is_tx_fifo_full(PIO, SM_LEFT))
-            pio_sm_put(PIO, SM_LEFT, pioSample);
-        else
-            ringbuf_put_one(&pioRing, &pioSample);
+        if (!process_sample(&pioSampleL, &pioSampleR, refillBuffers))
+            continue;
+
+        ringbuf_put_one(&pioRingL, &pioSampleL);
     }
 }
 
-static bool process_sample(uint32_t *outSample)
+static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool allowRepeatPrevious)
 {
     uint32_t pcmStereoSample;
 
@@ -149,10 +151,20 @@ static bool process_sample(uint32_t *outSample)
         return false;
 
     //test: take L
-    //*outSample = pcmStereoSample & 0xFFFF;
     //*outSample = 0b10101010101010101010101010101010;
-    *outSample = dsm_process_sample(&dsmLeft, (int16_t)(pcmStereoSample & 0xFFFF));
+    *outSampleL = dsm_process_sample(&dsmLeft, (int16_t)(pcmStereoSample & 0xFFFF));
+
+// #include <math.h>
+
+//     static int16_t saw = 0;
+//     static bool dir = 0;
+
+//     if (saw >= 20000 | saw <= -20000)
+//         dir = !dir;
+
+//     saw += dir ? 1000 : -1000;
+
+//     *outSampleL = dsm_process_sample(&dsmLeft, (int16_t)(saw));
 
     return true;
-    //
 }
