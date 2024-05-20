@@ -1,3 +1,4 @@
+/* tinyUSB uac2_headset example */
 /* 
  * The MIT License (MIT)
  *

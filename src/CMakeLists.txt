@@ -16,6 +16,8 @@ add_executable(rp2040_dac_amp
     usb_descriptors.c
 )
 
+pico_generate_pio_header(rp2040_dac_amp ${CMAKE_CURRENT_LIST_DIR}/hbridge.pio)
+
 # Make sure TinyUSB can find tusb_config.h
 target_include_directories(rp2040_dac_amp PUBLIC
     .
@@ -26,6 +28,7 @@ target_link_libraries(rp2040_dac_amp PUBLIC
     pico_unique_id 
     tinyusb_device 
     tinyusb_board
+    hardware_pio
 )
 
 # create map/bin/hex/uf2 file in addition to ELF.

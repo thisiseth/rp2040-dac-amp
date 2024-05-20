@@ -31,14 +31,13 @@
 #include "tusb.h"
 #include "usb_descriptors.h"
 
-//--------------------------------------------------------------------+
-// MACRO CONSTANT TYPEDEF PROTOTYPES
-//--------------------------------------------------------------------+
+#include "pico/stdlib.h"
+#include "hbridge.pio.h"
 
 // List of supported sample rates
-const uint32_t sample_rates[] = {44100, 48000, 88200, 96000};
+const uint32_t sample_rates[] = {48000 /* 44100, 48000, 88200, 96000*/};
 
-uint32_t current_sample_rate  = 44100;
+uint32_t current_sample_rate  = 48000; //44100;
 
 #define N_SAMPLE_RATES  TU_ARRAY_SIZE(sample_rates)
 
@@ -79,20 +78,36 @@ static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
 int8_t mute[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];       // +1 for master channel 0
 int16_t volume[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX + 1];    // +1 for master channel 0
 
-// Buffer for microphone data
-int32_t mic_buf[CFG_TUD_AUDIO_FUNC_1_EP_IN_SW_BUF_SZ / 4];
 // Buffer for speaker data
 int32_t spk_buf[CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ / 4];
 // Speaker data size received in the last frame
 int spk_data_size;
 // Resolution per format
-const uint8_t resolutions_per_format[CFG_TUD_AUDIO_FUNC_1_N_FORMATS] = {CFG_TUD_AUDIO_FUNC_1_FORMAT_1_RESOLUTION_RX,
-                                                                        CFG_TUD_AUDIO_FUNC_1_FORMAT_2_RESOLUTION_RX};
+const uint8_t resolutions_per_format[CFG_TUD_AUDIO_FUNC_1_N_FORMATS] = {CFG_TUD_AUDIO_FUNC_1_FORMAT_1_RESOLUTION_RX/*,
+                                                                        CFG_TUD_AUDIO_FUNC_1_FORMAT_2_RESOLUTION_RX*/};
 // Current resolution, update on format change
 uint8_t current_resolution;
 
 void led_blinking_task(void);
 void audio_task(void);
+
+void stasyan_init(void)
+{
+  gpio_init(23);
+  gpio_set_dir(23, GPIO_OUT);
+  gpio_put(23, 1);
+
+  set_sys_clock_pll(1536000000, 4, 4);
+
+  uint offset = pio_add_program(pio0, &hbridge_program);
+  hbridge_program_init(pio0, 0, offset, 3);
+}
+
+void pio_task(void)
+{
+  //pio_sm_put_blocking(pio0, 0, (uint32_t)0b10101010110011001111000011110000);
+  pio_sm_put_blocking(pio0, 0, (uint32_t)0b10101010101010101010101010101010);
+}
 
 /*------------- MAIN -------------*/
 int main(void)
@@ -104,11 +119,14 @@ int main(void)
 
   TU_LOG1("Headset running\r\n");
 
+  stasyan_init();
+
   while (1)
   {
     tud_task(); // TinyUSB device task
     audio_task();
     led_blinking_task();
+    pio_task();
   }
 
   return 0;
@@ -364,17 +382,6 @@ bool tud_audio_rx_done_pre_read_cb(uint8_t rhport, uint16_t n_bytes_received, ui
   (void)cur_alt_setting;
 
   spk_data_size = tud_audio_read(spk_buf, n_bytes_received);
-  return true;
-}
-
-bool tud_audio_tx_done_pre_load_cb(uint8_t rhport, uint8_t itf, uint8_t ep_in, uint8_t cur_alt_setting)
-{
-  (void)rhport;
-  (void)itf;
-  (void)ep_in;
-  (void)cur_alt_setting;
-
-  // This callback could be used to fill microphone data separately
   return true;
 }
 

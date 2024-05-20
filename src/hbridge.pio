@@ -1,0 +1,44 @@
+.program hbridge
+
+.define public T_PULSE_CLOCKS 25
+.define public T_ACTIVE_TO_DEAD T_PULSE_CLOCKS - 1
+
+.wrap_target
+read_data:
+    out x, 1
+    jmp x!=y set_output
+    jmp read_data [T_ACTIVE_TO_DEAD - 2]
+set_output:
+    mov y, x
+    jmp !y set_minus
+;set_plus
+    set pins, 0
+    set pins, 0b01
+    jmp read_data [T_ACTIVE_TO_DEAD - 6]
+set_minus:
+    set pins, 0
+    set pins, 0b10
+    jmp read_data [T_ACTIVE_TO_DEAD - 6]
+
+% c-sdk {
+static inline void hbridge_program_init(PIO pio, uint sm, uint offset, uint pin) {
+    pio_gpio_init(pio, pin);
+    pio_gpio_init(pio, pin + 1);
+
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true);
+
+    gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_12MA);
+    gpio_set_drive_strength(pin + 1, GPIO_DRIVE_STRENGTH_12MA);
+
+    pio_sm_config c = hbridge_program_get_default_config(offset);
+
+    sm_config_set_set_pins(&c, pin, 2);
+    sm_config_set_out_shift(&c, true, true, 32);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    sm_config_set_clkdiv_int_frac(&c, 5, 0);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}

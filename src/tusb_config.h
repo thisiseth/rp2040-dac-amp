@@ -109,10 +109,10 @@ extern "C" {
 #define CFG_TUD_AUDIO_FUNC_1_DESC_LEN                                TUD_AUDIO_DAC_AMP_STEREO_DESC_LEN
 
 // How many formats are used, need to adjust USB descriptor if changed
-#define CFG_TUD_AUDIO_FUNC_1_N_FORMATS                               2
+#define CFG_TUD_AUDIO_FUNC_1_N_FORMATS                               1 // 2 // limit to 16 bit/48k
 
 // Audio format type I specifications
-#define CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE                         96000     // 24bit/96kHz is the best quality for full-speed, high-speed is needed beyond this
+#define CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE                         48000 // 96000     // 24bit/96kHz is the best quality for full-speed, high-speed is needed beyond this
 #define CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX                           2
 
 // 16bit in 16bit slots
@@ -120,20 +120,17 @@ extern "C" {
 #define CFG_TUD_AUDIO_FUNC_1_FORMAT_1_RESOLUTION_RX                  16
 
 // 24bit in 32bit slots
-#define CFG_TUD_AUDIO_FUNC_1_FORMAT_2_N_BYTES_PER_SAMPLE_RX          4
-#define CFG_TUD_AUDIO_FUNC_1_FORMAT_2_RESOLUTION_RX                  24
-
-// EP and buffer size - for isochronous EP´s, the buffer and EP size are equal (different sizes would not make sense)
-#define CFG_TUD_AUDIO_ENABLE_EP_IN                0
+//#define CFG_TUD_AUDIO_FUNC_1_FORMAT_2_N_BYTES_PER_SAMPLE_RX          4
+//#define CFG_TUD_AUDIO_FUNC_1_FORMAT_2_RESOLUTION_RX                  24
 
 // EP and buffer size - for isochronous EP´s, the buffer and EP size are equal (different sizes would not make sense)
 #define CFG_TUD_AUDIO_ENABLE_EP_OUT               1
 
 #define CFG_TUD_AUDIO_UNC_1_FORMAT_1_EP_SZ_OUT    TUD_AUDIO_EP_SIZE(CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE, CFG_TUD_AUDIO_FUNC_1_FORMAT_1_N_BYTES_PER_SAMPLE_RX, CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)
-#define CFG_TUD_AUDIO_UNC_1_FORMAT_2_EP_SZ_OUT    TUD_AUDIO_EP_SIZE(CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE, CFG_TUD_AUDIO_FUNC_1_FORMAT_2_N_BYTES_PER_SAMPLE_RX, CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)
+//#define CFG_TUD_AUDIO_UNC_1_FORMAT_2_EP_SZ_OUT    TUD_AUDIO_EP_SIZE(CFG_TUD_AUDIO_FUNC_1_MAX_SAMPLE_RATE, CFG_TUD_AUDIO_FUNC_1_FORMAT_2_N_BYTES_PER_SAMPLE_RX, CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_RX)
 
-#define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ     TU_MAX(CFG_TUD_AUDIO_UNC_1_FORMAT_1_EP_SZ_OUT, CFG_TUD_AUDIO_UNC_1_FORMAT_2_EP_SZ_OUT)*2
-#define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX        TU_MAX(CFG_TUD_AUDIO_UNC_1_FORMAT_1_EP_SZ_OUT, CFG_TUD_AUDIO_UNC_1_FORMAT_2_EP_SZ_OUT) // Maximum EP IN size for all AS alternate settings used
+#define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ     CFG_TUD_AUDIO_UNC_1_FORMAT_1_EP_SZ_OUT*2 //TU_MAX(CFG_TUD_AUDIO_UNC_1_FORMAT_1_EP_SZ_OUT, CFG_TUD_AUDIO_UNC_1_FORMAT_2_EP_SZ_OUT)*2
+#define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX        CFG_TUD_AUDIO_UNC_1_FORMAT_1_EP_SZ_OUT   //TU_MAX(CFG_TUD_AUDIO_UNC_1_FORMAT_1_EP_SZ_OUT, CFG_TUD_AUDIO_UNC_1_FORMAT_2_EP_SZ_OUT) // Maximum EP IN size for all AS alternate settings used
 
 // Number of Standard AS Interface Descriptors (4.9.1) defined per audio function - this is required to be able to remember the current alternate settings of these interfaces - We restrict us here to have a constant number for all audio functions (which means this has to be the maximum number of AS interfaces an audio function has and a second audio function with less AS interfaces just wastes a few bytes)
 #define CFG_TUD_AUDIO_FUNC_1_N_AS_INT 	          1
