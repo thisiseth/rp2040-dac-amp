@@ -1,5 +1,6 @@
 .program hbridge
 
+;96mhz = 48k * 16 (oversample) * (24+1) (PIO period) * 5 (PIO divider)
 .define public T_PULSE_CLOCKS 25
 .define public T_ACTIVE_TO_DEAD T_PULSE_CLOCKS - 1
 
