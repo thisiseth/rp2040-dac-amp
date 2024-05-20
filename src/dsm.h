@@ -1,26 +1,21 @@
-//stupidest ever delta sigma modulator with 32x LINEAR oversampling
+//4th order DSM with CIFF topology and linear interpolation 32x oversampling
 
 #pragma once
 
 #include <memory.h>
 #include <stdint.h>
 
-#define _DSM_INT_MAX                (0x7FFF << 8)
-#define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time
-#define _DSM_INT16_TO_INT32(a)      ((((int32_t)(a))*3) << 6) //limit modulator input to 75%
-
 typedef struct dsm
 {
     int16_t prevSample;
-    int32_t buf[32];
     int32_t integrator[4];
-    bool prevOutput;
+    uint32_t prevOutputHigh;
 } dsm_t;
 
 static void dsm_init(dsm_t* ptr)
 {
     ptr->prevSample = 0;
-    ptr->prevOutput = false;
+    ptr->prevOutputHigh = 0;
     memset(ptr->integrator, 0, sizeof(int32_t) * 4);
 }
 
@@ -29,17 +24,9 @@ static inline void dsm_reset(dsm_t* ptr)
     dsm_init(ptr);
 }
 
-static void _dsm_interpolate(int32_t* buf, int16_t firstSample, int16_t secondSample)
-{
-    //linear interpolation :clown-emoji:
-    int32_t sample = _DSM_INT16_TO_INT32(firstSample);
-    int32_t step = (_DSM_INT16_TO_INT32(secondSample) - sample) / 32;
-
-    buf[0] = sample;
-
-    for (int i = 1; i < 32; ++i)
-        buf[i] = (sample += step);
-}
+#define _DSM_INT_MAX                (0x7FFF << 8)
+#define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time
+#define _DSM_INT16_TO_INT32(a)      ((((int32_t)(a))*3) << 6) //limit modulator input to 75%
 
 #define _DSM_QUANTIZE(a)                ((a) ? _DSM_INT_MAX : (-_DSM_INT_MAX))
 #define _DSM_QUANTIZE_SHORT_PULSE(a)    ((a) ? _DSM_INT_MAX_SHORT_PULSE : (-_DSM_INT_MAX_SHORT_PULSE))
@@ -68,44 +55,49 @@ static void _dsm_interpolate(int32_t* buf, int16_t firstSample, int16_t secondSa
 #define _DSM_G1(a) ((a) >> 10)
 #define _DSM_G2(a) ((a) >> 7)
 
-static inline bool _dsm_calculate(dsm_t* ptr, int32_t input)
+//watning: optimizations
+static inline uint32_t _dsm_calculate(dsm_t* ptr, int32_t input)
 {
-    int32_t quantizerInput = 
-        _DSM_A1(ptr->integrator[0]) +
-        _DSM_A2(ptr->integrator[1]) +
-        _DSM_A3(ptr->integrator[2]) +
-        _DSM_A4(ptr->integrator[3]) +
-        _DSM_B5(input);
+    uint32_t outputHigh = 
+        (_DSM_A1(ptr->integrator[0]) +
+         _DSM_A2(ptr->integrator[1]) +
+         _DSM_A3(ptr->integrator[2]) +
+         _DSM_A4(ptr->integrator[3]) +
+         _DSM_B5(input)) > 0;
 
-    //if output changes we lose some precious energy during H-bridge dead-time, otherwise we get full-length pulse.. i think...
-    bool outputHigh = quantizerInput > 0;
-
-    int32_t output = outputHigh == ptr->prevOutput
+    int32_t output = outputHigh == ptr->prevOutputHigh
         ? _DSM_QUANTIZE(outputHigh)
         : _DSM_QUANTIZE_SHORT_PULSE(outputHigh);
+
+    ptr->prevOutputHigh = outputHigh;
 
     ptr->integrator[0] += _DSM_B1(input) - _DSM_C1(output) - _DSM_G1(ptr->integrator[1]);
     ptr->integrator[1] += _DSM_B2(input) + _DSM_C2(ptr->integrator[0]);
     ptr->integrator[2] += _DSM_B3(input) + _DSM_C3(ptr->integrator[1]) - _DSM_G2(ptr->integrator[2]);
     ptr->integrator[3] += _DSM_B4(input) + _DSM_C4(ptr->integrator[2]);
 
-    return ptr->prevOutput = outputHigh;
+    return outputHigh;
 }
 
 static uint32_t dsm_process_sample(dsm_t* ptr, int16_t pcm)
 {
     uint32_t ret = 0;
 
-    _dsm_interpolate(ptr->buf, ptr->prevSample, pcm);
+    //linear interpolation with 1 sample delay
+    int32_t sample = _DSM_INT16_TO_INT32(ptr->prevSample);
+    int32_t step = (_DSM_INT16_TO_INT32(pcm) - sample) >> 5; // / 32
 
-    ptr->prevSample = pcm;
+    ptr->prevSample = pcm;        
+    
+    ret |= _dsm_calculate(ptr, sample);
+    sample += step;
 
-    for (int i = 0; i < 32; ++i)
+    for (int i = 0; i < 31; ++i)
     {
-        ret >>= 1;
+        ret <<= 1;
 
-        if (_dsm_calculate(ptr, ptr->buf[i]))
-            ret |= 0x80000000;
+        ret |= _dsm_calculate(ptr, sample);
+        sample += step;
     }
 
     return ret;

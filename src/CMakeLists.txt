@@ -7,6 +7,7 @@ include(pico_sdk_import.cmake)
 project(rp2040_dac_amp)
 
 add_compile_options(-O3)
+add_compile_options(-Wno-stringop-overflow)
 
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -34,6 +35,7 @@ target_link_libraries(rp2040_dac_amp PUBLIC
     hardware_pio
     pico_multicore 
     pico_sync
+    pico_platform
 )
 
 # create map/bin/hex/uf2 file in addition to ELF.

@@ -5,8 +5,10 @@
 .define public T_DEAD_CLOCKS 3 ;lower dead-time gives me a bit less noise, but mosfets get dangerously hot
 .define public T_ACTIVE_CLOCKS T_PULSE_CLOCKS - T_DEAD_CLOCKS
 
+;           out pins:  3210
 .define BRIDGE_PLUS 0b01111
 
+;        out pins:  76543210
 ; BRIDGE_MINUS is 0b11110000, but set is limited to only 5 bits
 ;so we'll have to use mov with bit-inversion
 
@@ -29,33 +31,23 @@ set_minus:
     jmp read_data [T_ACTIVE_CLOCKS - 7]
 
 % c-sdk {
-static inline void hbridge_program_init(PIO pio, uint sm, uint offset, uint pin) 
+#define HBRIDGE_CHANNEL_PIN_LENGTH 8
+
+static inline void _hbridge_program_init_channel(PIO pio, uint sm, uint offset, uint pin) 
 {
-    pio_gpio_init(pio, pin);
-    pio_gpio_init(pio, pin + 1);
-    pio_gpio_init(pio, pin + 2);
-    pio_gpio_init(pio, pin + 3);
-    pio_gpio_init(pio, pin + 4);
-    pio_gpio_init(pio, pin + 5);
-    pio_gpio_init(pio, pin + 6);
-    pio_gpio_init(pio, pin + 7);
+    for (int i = 0; i < HBRIDGE_CHANNEL_PIN_LENGTH; ++i)
+        pio_gpio_init(pio, pin + i);
 
-    pio_sm_set_consecutive_pindirs(pio, sm, pin, 8, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, HBRIDGE_CHANNEL_PIN_LENGTH, true);
 
-    gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_drive_strength(pin + 1, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_drive_strength(pin + 2, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_drive_strength(pin + 3, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_drive_strength(pin + 4, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_drive_strength(pin + 5, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_drive_strength(pin + 6, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_drive_strength(pin + 7, GPIO_DRIVE_STRENGTH_12MA);
+    for (int i = 0; i < HBRIDGE_CHANNEL_PIN_LENGTH; ++i)
+        gpio_set_drive_strength(pin + i, GPIO_DRIVE_STRENGTH_12MA);
 
     pio_sm_config c = hbridge_program_get_default_config(offset);
 
-    sm_config_set_out_pins(&c, pin, 8);
+    sm_config_set_out_pins(&c, pin, HBRIDGE_CHANNEL_PIN_LENGTH);
 
-    sm_config_set_out_shift(&c, true, true, 32);
+    sm_config_set_out_shift(&c, false, true, 32);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
     sm_config_set_clkdiv_int_frac(&c, 5, 0);
@@ -63,16 +55,55 @@ static inline void hbridge_program_init(PIO pio, uint sm, uint offset, uint pin)
     pio_sm_init(pio, sm, offset, &c);
 }
 
-static inline void hbridge_program_start(PIO pio, uint sm) 
+static inline bool hbridge_program_init(PIO pio, uint smLeft, uint smRight, uint offset, uint pinLeft, uint pinRight) 
 {
-    pio_sm_restart(pio, sm);
-    pio_sm_set_enabled(pio, sm, true);
+#ifdef HBRIDGE_STEREO
+    //just to be sure we are not overlapping since this will likely fry the bridges
+    if (pinLeft - pinRight < HBRIDGE_CHANNEL_PIN_LENGTH &&
+        pinRight - pinLeft < HBRIDGE_CHANNEL_PIN_LENGTH)
+        return false;
+
+    if (pio_sm_is_claimed(pio, smRight))
+        return false;
+
+    pio_sm_claim(pio, smRight);
+#endif
+
+    if (pio_sm_is_claimed(pio, smLeft))
+        return false;
+
+    pio_sm_claim(pio, smLeft);
+
+    _hbridge_program_init_channel(pio, smLeft, offset, pinLeft);
+#ifdef HBRIDGE_STEREO
+    _hbridge_program_init_channel(pio, smRight, offset, pinRight);
+#endif
+
+    return true;
 }
 
-static inline void hbridge_program_stop(PIO pio, uint sm) 
+static inline void hbridge_program_start(PIO pio, uint smLeft, uint smRight) 
 {
-    pio_sm_set_enabled(pio, sm, false);
-    pio_sm_drain_tx_fifo(pio, sm);
-    pio_sm_set_pins(pio, sm, 0);
+    int mask = 1 << smLeft;
+#ifdef HBRIDGE_STEREO   
+    mask += 1 << smRight;
+#endif
+
+    //restart in sync for no real reason because of feeding the fifos not simultaneously
+    pio_restart_sm_mask(pio, mask);
+    pio_enable_sm_mask_in_sync(pio, mask);
+}
+
+static inline void hbridge_program_stop(PIO pio, uint smLeft, uint smRight) 
+{
+    pio_sm_set_enabled(pio, smLeft, false);
+    pio_sm_drain_tx_fifo(pio, smLeft);
+    pio_sm_set_pins(pio, smLeft, 0);
+
+#ifdef HBRIDGE_STEREO    
+    pio_sm_set_enabled(pio, smRight, false);
+    pio_sm_drain_tx_fifo(pio, smRight);
+    pio_sm_set_pins(pio, smRight, 0);
+#endif
 }
 %}

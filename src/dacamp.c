@@ -5,11 +5,16 @@
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/sync.h"
+#include "pico/platform.h"
+
+#include "ringbuf.h"
+#include "dsm.h"
+
+//  undefine to process and init only one channel; 
+// has to be before the inclusion of "hbridge.pio.h"
+#define HBRIDGE_STEREO
 
 #include "hbridge.pio.h"
-#include "ringbuf.h"
-
-#include "dsm.h"
 
 #define PIO         pio0
 #define SM_LEFT     0
@@ -63,12 +68,16 @@ static ringbuf_t pcmRing;
 
 static dsm_t dsmLeft, dsmRight;
 
-static int16_t lastPcmLeft, lastPcmRight;
+static uint32_t lastPcm;
 
-auto_init_mutex(pcmMutex);
+#define _DACAMP_PCM_LEFT(pcm) ((int16_t)(pcm))
+#define _DACAMP_PCM_RIGHT(pcm) ((int16_t)((pcm) >> 16))
+
+spin_lock_t *pcmLock;
 
 static void core1_worker(void);
 static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool allowRepeatPrevious);
+static void dacamp_panic();
 
 void dacamp_init(void)
 {
@@ -82,6 +91,8 @@ void dacamp_init(void)
 
     ringbuf_init(&pcmRing, &pcmRingInternalBuffer, PCM_RING_BUFFER_DEPTH, sizeof(uint32_t));
 
+    pcmLock = spin_lock_init(spin_lock_claim_unused(true));
+
     multicore_launch_core1(core1_worker);
 }
 
@@ -94,11 +105,11 @@ void dacamp_stop(void)
 {
     isEnabledRequested = false;
 
-    mutex_enter_blocking(&pcmMutex);
+    uint32_t irq = spin_lock_blocking(pcmLock);
 
     ringbuf_clear(&pcmRing);
 
-    mutex_exit(&pcmMutex);
+    spin_unlock(pcmLock, irq);
 }
 
 int dacamp_pcm_put(uint32_t* samples, int sampleCount)
@@ -106,11 +117,11 @@ int dacamp_pcm_put(uint32_t* samples, int sampleCount)
     if (!isEnabledRequested)
         return sampleCount; //discard
 
-    mutex_enter_blocking(&pcmMutex);
+    uint32_t irq = spin_lock_blocking(pcmLock);
 
     int ret = ringbuf_put(&pcmRing, samples, sampleCount);
 
-    mutex_exit(&pcmMutex);
+    spin_unlock(pcmLock, irq);
 
     return ret;
 }
@@ -118,18 +129,19 @@ int dacamp_pcm_put(uint32_t* samples, int sampleCount)
 static void core1_worker(void) 
 {
     uint offset = pio_add_program(PIO, &hbridge_program);
-    hbridge_program_init(PIO, SM_LEFT, offset, HBRIDGE_LEFT_START_PIN);
+
+    if (!hbridge_program_init(PIO, SM_LEFT, SM_RIGHT, offset, HBRIDGE_LEFT_START_PIN, HBRIDGE_RIGHT_START_PIN))
+        dacamp_panic();
 
     bool isEnabledActual = false;
     bool refillBuffers = false;
 
-    uint32_t pioRingLInternalBuf[PIO_RING_BUFFER_DEPTH], pioRingRInternalBuf[PIO_RING_BUFFER_DEPTH];
-    ringbuf_t pioRingL, pioRingR;
+    uint64_t pioRingInternalBuf[PIO_RING_BUFFER_DEPTH];
+    ringbuf_t pioRing;
 
-    ringbuf_init(&pioRingL, pioRingLInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint32_t));
-    ringbuf_init(&pioRingR, pioRingRInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint32_t));
+    ringbuf_init(&pioRing, pioRingInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint64_t));
 
-    uint32_t pioSampleL, pioSampleR;
+    uint32_t pioSample[2];
 
     while (1) {
         bool isEnabled = isEnabledRequested;
@@ -140,15 +152,14 @@ static void core1_worker(void)
             {
                 dsm_reset(&dsmLeft);
                 dsm_reset(&dsmRight);
-                ringbuf_clear(&pioRingL);
-                ringbuf_clear(&pioRingR);
+                ringbuf_clear(&pioRing);
                 refillBuffers = true;
-                lastPcmLeft = lastPcmRight = 0;
+                lastPcm = 0;
 
-                hbridge_program_start(PIO, SM_LEFT);
+                hbridge_program_start(PIO, SM_LEFT, SM_RIGHT);
             }
             else 
-                hbridge_program_stop(PIO, SM_LEFT);
+                hbridge_program_stop(PIO, SM_LEFT, SM_RIGHT);
 
             isEnabledActual = isEnabled;
         }
@@ -156,50 +167,55 @@ static void core1_worker(void)
         if (!isEnabledActual)
             continue;
 
-        if (refillBuffers && ringbuf_is_full(&pioRingL))
+        if (refillBuffers && ringbuf_is_full(&pioRing))
             refillBuffers = false;
 
         if (!refillBuffers)
-            while (!pio_sm_is_tx_fifo_full(PIO, SM_LEFT) && ringbuf_get_one(&pioRingL, &pioSampleL))
-                pio_sm_put(PIO, SM_LEFT, pioSampleL);
+            while (!pio_sm_is_tx_fifo_full(PIO, SM_LEFT) && ringbuf_get_one(&pioRing, pioSample))
+            {   
+                // assuming we already fill right first and left second, 
+                //and they consume bits at the same rate, left will always be 'fuller'
+#ifdef HBRIDGE_STEREO
+                pio_sm_put(PIO, SM_RIGHT, pioSample[1]);
+#endif
+                pio_sm_put(PIO, SM_LEFT, pioSample[0]);
+            }
 
-        if (ringbuf_is_full(&pioRingL))
+        if (ringbuf_is_full(&pioRing))
             continue;
 
-        if (!process_sample(&pioSampleL, &pioSampleR, !ringbuf_is_empty(&pioRingL) || refillBuffers))
+        if (!process_sample(&pioSample[0], &pioSample[1], !ringbuf_is_empty(&pioRing) || refillBuffers))
             continue;
 
-        ringbuf_put_one(&pioRingL, &pioSampleL);
+        ringbuf_put_one(&pioRing, pioSample);
     }
 }
 
-static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool doNotRepeatPrevious)
+static inline bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool doNotRepeatPrevious)
 {
-    uint32_t pcmStereoSample;
+    uint32_t irq = spin_lock_blocking(pcmLock);
 
-    mutex_enter_blocking(&pcmMutex);
+    bool success = ringbuf_get_one(&pcmRing, &lastPcm);
 
-    bool success = ringbuf_get_one(&pcmRing, &pcmStereoSample);
+    spin_unlock(pcmLock, irq);
 
-    mutex_exit(&pcmMutex);
-
-////////////
-    //*outSampleL = 0b10101010110011001111000111111110;
-    //*outSampleL = 0b10101010101010101010101010101010;
-    //return true;
-////////////
-
-    if (success)
-    {
-        lastPcmLeft = (int16_t)(pcmStereoSample & 0xFFFF);
-        lastPcmRight = (int16_t)(pcmStereoSample >> 16);
-    } 
-    else if (doNotRepeatPrevious)
+    if (!success && doNotRepeatPrevious)
         return false;
 
-    //only left for now
-    *outSampleL = dsm_process_sample(&dsmLeft, lastPcmLeft);
-    //*outSampleR = dsm_process_sample(&dsmRight, lastPcmRight);
+    *outSampleL = dsm_process_sample(&dsmLeft, _DACAMP_PCM_LEFT(lastPcm));
+#if 1//#ifdef HBRIDGE_STEREO
+    *outSampleR = dsm_process_sample(&dsmRight, _DACAMP_PCM_RIGHT(lastPcm));
+#endif
 
     return true;
+}
+
+static void dacamp_panic()
+{
+    //enable led
+    gpio_init(25);
+    gpio_set_dir(25, GPIO_OUT);
+    gpio_put(25, 1);
+
+    panic("dacamp panic");
 }
