@@ -166,7 +166,7 @@ static void core1_worker(void)
         if (ringbuf_is_full(&pioRingL))
             continue;
 
-        if (!process_sample(&pioSampleL, &pioSampleR, refillBuffers))
+        if (!process_sample(&pioSampleL, &pioSampleR, !ringbuf_is_empty(&pioRingL) || refillBuffers))
             continue;
 
         ringbuf_put_one(&pioRingL, &pioSampleL);
@@ -199,6 +199,7 @@ static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool doNo
 
     //only left for now
     *outSampleL = dsm_process_sample(&dsmLeft, lastPcmLeft);
+    //*outSampleR = dsm_process_sample(&dsmRight, lastPcmRight);
 
     return true;
 }
