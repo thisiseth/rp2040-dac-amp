@@ -14,6 +14,7 @@ pico_sdk_init()
 add_executable(rp2040_dac_amp
     main.c
     usb_descriptors.c
+    dacamp.c
 )
 
 pico_generate_pio_header(rp2040_dac_amp ${CMAKE_CURRENT_LIST_DIR}/hbridge.pio)
@@ -29,6 +30,8 @@ target_link_libraries(rp2040_dac_amp PUBLIC
     tinyusb_device 
     tinyusb_board
     hardware_pio
+    pico_multicore 
+    pico_sync
 )
 
 # create map/bin/hex/uf2 file in addition to ELF.
