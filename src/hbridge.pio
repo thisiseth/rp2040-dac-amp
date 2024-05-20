@@ -2,7 +2,7 @@
 
 ;192mhz = 48k * 32 (oversample) * (24+1) (PIO period) * 5 (PIO divider)
 .define public T_PULSE_CLOCKS 25
-.define public T_DEAD_CLOCKS 2
+.define public T_DEAD_CLOCKS 4
 .define public T_ACTIVE_CLOCKS T_PULSE_CLOCKS - T_DEAD_CLOCKS
 
 .wrap_target
@@ -14,12 +14,12 @@ set_output:
     mov y, x
     jmp !y set_minus
 ;set_plus
-    set pins, 0 [T_DEAD_CLOCKS - 1]
-    set pins, 0b01
+    set pins, 0b0000 [T_DEAD_CLOCKS - 1]
+    set pins, 0b0011
     jmp read_data [T_ACTIVE_CLOCKS - 6]
 set_minus:
-    set pins, 0 [T_DEAD_CLOCKS - 1]
-    set pins, 0b10
+    set pins, 0b0000 [T_DEAD_CLOCKS - 1]
+    set pins, 0b1100
     jmp read_data [T_ACTIVE_CLOCKS - 6]
 
 % c-sdk {
@@ -27,15 +27,19 @@ static inline void hbridge_program_init(PIO pio, uint sm, uint offset, uint pin)
 {
     pio_gpio_init(pio, pin);
     pio_gpio_init(pio, pin + 1);
+    pio_gpio_init(pio, pin + 2);
+    pio_gpio_init(pio, pin + 3);
 
-    pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 4, true);
 
     gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_12MA);
     gpio_set_drive_strength(pin + 1, GPIO_DRIVE_STRENGTH_12MA);
+    gpio_set_drive_strength(pin + 2, GPIO_DRIVE_STRENGTH_12MA);
+    gpio_set_drive_strength(pin + 3, GPIO_DRIVE_STRENGTH_12MA);
 
     pio_sm_config c = hbridge_program_get_default_config(offset);
 
-    sm_config_set_set_pins(&c, pin, 2);
+    sm_config_set_set_pins(&c, pin, 4);
     sm_config_set_out_shift(&c, true, true, 32);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
@@ -54,6 +58,6 @@ static inline void hbridge_program_stop(PIO pio, uint sm)
 {
     pio_sm_set_enabled(pio, sm, false);
     pio_sm_drain_tx_fifo(pio, sm);
-    pio_sm_set_pins(pio, sm, 0b00);
+    pio_sm_set_pins(pio, sm, 0b0000);
 }
 %}

@@ -5,12 +5,17 @@
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/sync.h"
+
 #include "hbridge.pio.h"
 #include "ringbuf.h"
+#include "dsm.h"
+
 
 #define PIO         pio0
 #define SM_LEFT     0
 #define SM_RIGHT    1
+                                 //6789 67 & 89 GPIO should be paralleled for more drive current
+#define HBRIDGE_LEFT_START_PIN 6 //++--
 
 #define PIO_TX_FIFO_DEPTH       8
 #define PIO_RING_BUFFER_DEPTH   64 //allow buffering of up to 64 pio samples, should be at least PIO_TX_FIFO_DEPTH in size
@@ -21,6 +26,8 @@ static volatile bool isEnabledRequested;
 
 static uint32_t pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH];
 static ringbuf_t pcmRing;
+
+static dsm_t dsmLeft;
 
 auto_init_mutex(pcmMutex);
 
@@ -75,7 +82,7 @@ int dacamp_pcm_put(const uint32_t* samples, int sampleCount)
 static void core1_worker(void) 
 {
     uint offset = pio_add_program(PIO, &hbridge_program);
-    hbridge_program_init(PIO, SM_LEFT, offset, 3);
+    hbridge_program_init(PIO, SM_LEFT, offset, HBRIDGE_LEFT_START_PIN);
 
     bool isEnabledActual;
     bool waitFull;
@@ -93,6 +100,7 @@ static void core1_worker(void)
         {
             if (isEnabled) 
             {
+                dsm_reset(&dsmLeft);
                 ringbuf_clear(&pioRing);
                 hbridge_program_start(PIO, SM_LEFT);
             }
@@ -141,7 +149,9 @@ static bool process_sample(uint32_t *outSample)
         return false;
 
     //test: take L, else is zeroed
-    *outSample = 0b10101010101010101010101010101010;//pcmStereoSample & 0xFFFF;
+    //*outSample = pcmStereoSample & 0xFFFF;
+    //*outSample = 0b10101010101010101010101010101010;
+    *outSample = dsm_process_sample(&dsmLeft, (int16_t)(pcmStereoSample & 0xFFFF));
 
     return true;
     //
