@@ -18,7 +18,7 @@
 #define HBRIDGE_LEFT_START_PIN 6 //++--
 
 #define PIO_TX_FIFO_DEPTH       8
-#define PIO_RING_BUFFER_DEPTH   64 //allow buffering of up to 64 pio samples, should be at least PIO_TX_FIFO_DEPTH in size
+#define PIO_RING_BUFFER_DEPTH   32 //allow buffering of up to N processed pio samples, should be at least PIO_TX_FIFO_DEPTH in size
 
 #define PCM_RING_BUFFER_DEPTH   8192
 
@@ -148,7 +148,7 @@ static bool process_sample(uint32_t *outSample)
     if (!success)
         return false;
 
-    //test: take L, else is zeroed
+    //test: take L
     //*outSample = pcmStereoSample & 0xFFFF;
     //*outSample = 0b10101010101010101010101010101010;
     *outSample = dsm_process_sample(&dsmLeft, (int16_t)(pcmStereoSample & 0xFFFF));

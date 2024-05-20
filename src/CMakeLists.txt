@@ -6,6 +6,8 @@ include(pico_sdk_import.cmake)
 
 project(rp2040_dac_amp)
 
+add_compile_options(-O3)
+
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
