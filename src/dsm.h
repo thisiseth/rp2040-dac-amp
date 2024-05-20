@@ -7,9 +7,14 @@
 
 typedef struct dsm
 {
-    int16_t prevSample;
+    int32_t prevSample;
     int32_t integrator[4];
     uint32_t prevOutputHigh;
+    
+#ifdef DSM_INTEGRATOR_METRICS //only for local PC simulation
+    int32_t integratorMax[4];
+    int32_t integratorMin[4];
+#endif
 } dsm_t;
 
 static void dsm_init(dsm_t* ptr)
@@ -17,6 +22,11 @@ static void dsm_init(dsm_t* ptr)
     ptr->prevSample = 0;
     ptr->prevOutputHigh = 0;
     memset(ptr->integrator, 0, sizeof(int32_t) * 4);
+
+#ifdef DSM_INTEGRATOR_METRICS
+    memset(ptr->integratorMax, 0, sizeof(int32_t) * 4);
+    memset(ptr->integratorMin, 0, sizeof(int32_t) * 4);
+#endif
 }
 
 static inline void dsm_reset(dsm_t* ptr)
@@ -26,7 +36,7 @@ static inline void dsm_reset(dsm_t* ptr)
 
 #define _DSM_INT_MAX                (0x7FFF << 8)
 #define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time
-#define _DSM_INT16_TO_INT32(a)      ((((int32_t)(a)) * 45) << 2) //limit modulator input to 45/64= ~71%
+#define DSM_INT16_TO_INT32(a)      ((((int32_t)(a)) * 45) << 2) //limit modulator input to 45/64= ~71%
 
 #define _DSM_QUANTIZE(a)                ((a) ? _DSM_INT_MAX : (-_DSM_INT_MAX))
 #define _DSM_QUANTIZE_SHORT_PULSE(a)    ((a) ? _DSM_INT_MAX_SHORT_PULSE : (-_DSM_INT_MAX_SHORT_PULSE))
@@ -76,18 +86,29 @@ static inline uint32_t _dsm_calculate(dsm_t* ptr, int32_t input)
     ptr->integrator[2] += _DSM_B3(input) + _DSM_C3(ptr->integrator[1]) - _DSM_G2(ptr->integrator[2]);
     ptr->integrator[3] += _DSM_B4(input) + _DSM_C4(ptr->integrator[2]);
 
+#ifdef DSM_INTEGRATOR_METRICS
+    for (int i = 0; i < 4; ++i)
+    {
+        if (ptr->integrator[i] > ptr->integratorMax[i])
+            ptr->integratorMax[i] = ptr->integrator[i];
+
+        if (ptr->integrator[i] < ptr->integratorMin[i])
+            ptr->integratorMin[i] = ptr->integrator[i];
+    }
+#endif
+
     return outputHigh;
 }
 
-static uint32_t dsm_process_sample(dsm_t* ptr, int16_t pcm)
+static uint32_t dsm_process_sample(dsm_t* ptr, int32_t dsmPcm)
 {
     uint32_t ret = 0;
 
     //linear interpolation with 1 sample delay
-    int32_t sample = _DSM_INT16_TO_INT32(ptr->prevSample);
-    int32_t step = (_DSM_INT16_TO_INT32(pcm) - sample) >> 5; // / 32
+    int32_t sample = ptr->prevSample;
+    int32_t step = (dsmPcm - sample) >> 5; // / 32
 
-    ptr->prevSample = pcm;        
+    ptr->prevSample = dsmPcm;        
     
     ret |= _dsm_calculate(ptr, sample);
     sample += step;

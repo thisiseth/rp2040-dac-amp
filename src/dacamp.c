@@ -59,21 +59,29 @@
 #define PIO_TX_FIFO_DEPTH 8
 #define PIO_RING_BUFFER_DEPTH 32 //allow buffering of up to N processed pio samples, should be at least PIO_TX_FIFO_DEPTH in size
 
-#define PCM_RING_BUFFER_DEPTH 8192
+#define PCM_RING_BUFFER_DEPTH 4096
+
+#define PCM_TO_DSM_PCM_BUFFER_LENGTH 256
 
 static volatile bool isEnabledRequested;
 
-static uint32_t pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH] __aligned(4);
+static uint64_t pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH];
 static ringbuf_t pcmRing;
 
 static dsm_t dsmLeft, dsmRight;
 
-static uint32_t lastPcm;
-
-#define _DACAMP_PCM_LEFT(pcm) ((int16_t)(pcm))
-#define _DACAMP_PCM_RIGHT(pcm) ((int16_t)((pcm) >> 16))
+static uint64_t lastPcm;
 
 auto_init_mutex(pcmMutex);
+
+static uint64_t pcmToDsmPcmBuffer[PCM_TO_DSM_PCM_BUFFER_LENGTH];
+
+#define _DACAMP_PCM16_LEFT(pcm)         ((int16_t)(pcm))
+#define _DACAMP_PCM16_RIGHT(pcm)        ((int16_t)((pcm) >> 16))
+
+#define _DACAMP_DSM_PCM_LEFT(pcm)       ((int32_t)(pcm))
+#define _DACAMP_DSM_PCM_RIGHT(pcm)      ((int32_t)((pcm) >> 32))
+#define _DACAMP_DSM_PCM(left, right)    (((uint64_t)(left & 0xFFFFFFFF)) | (((uint64_t)((right)) << 32)))
 
 static void core1_worker(void);
 static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool allowRepeatPrevious);
@@ -89,7 +97,7 @@ void dacamp_init(void)
     //set clock to 192mhz
     set_sys_clock_pll(1536000000, 4, 2);
 
-    ringbuf_init(&pcmRing, &pcmRingInternalBuffer, PCM_RING_BUFFER_DEPTH, sizeof(uint32_t));
+    ringbuf_init(&pcmRing, &pcmRingInternalBuffer, PCM_RING_BUFFER_DEPTH, sizeof(uint64_t));
 
     multicore_launch_core1(core1_worker);
 }
@@ -115,11 +123,41 @@ int dacamp_pcm_put(uint32_t* samples, int sampleCount)
     if (!isEnabledRequested)
         return sampleCount; //discard
 
-    mutex_enter_blocking(&pcmMutex);
+    int ret = 0;
 
-    int ret = ringbuf_put(&pcmRing, samples, sampleCount);
+    while (sampleCount > 0)
+    {
+        int samplesToWrite = sampleCount > PCM_TO_DSM_PCM_BUFFER_LENGTH
+            ? PCM_TO_DSM_PCM_BUFFER_LENGTH 
+            : sampleCount;
+        
+        for (int i = 0; i < samplesToWrite; ++i)
+        {
+            uint32_t sample = samples[i];
+            int32_t sampleLeft = DSM_INT16_TO_INT32(_DACAMP_PCM16_LEFT(sample)), 
+                sampleRight = DSM_INT16_TO_INT32(_DACAMP_PCM16_RIGHT(sample));
 
-    mutex_exit(&pcmMutex);
+            //volumize
+
+            //
+
+            pcmToDsmPcmBuffer[i] = _DACAMP_DSM_PCM(sampleLeft, sampleRight);
+        }
+
+        mutex_enter_blocking(&pcmMutex);
+
+        int samplesWritten = ringbuf_put(&pcmRing, pcmToDsmPcmBuffer, samplesToWrite);
+
+        mutex_exit(&pcmMutex);
+
+        ret += samplesWritten;
+
+        if (samplesWritten != samplesToWrite)
+            break;
+
+        sampleCount -= samplesWritten;
+        samples += samplesWritten;
+    }
 
     return ret;
 }
@@ -134,7 +172,7 @@ static void core1_worker(void)
     bool isEnabledActual = false;
     bool refillBuffers = false;
 
-    uint64_t pioRingInternalBuf[PIO_RING_BUFFER_DEPTH] __aligned(4);
+    uint64_t pioRingInternalBuf[PIO_RING_BUFFER_DEPTH];
     ringbuf_t pioRing;
 
     ringbuf_init(&pioRing, pioRingInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint64_t));
@@ -200,9 +238,9 @@ static inline bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bo
     if (!success && doNotRepeatPrevious)
         return false;
 
-    *outSampleL = dsm_process_sample(&dsmLeft, _DACAMP_PCM_LEFT(lastPcm));
+    *outSampleL = dsm_process_sample(&dsmLeft, _DACAMP_DSM_PCM_LEFT(lastPcm));
 #ifdef HBRIDGE_STEREO
-    *outSampleR = dsm_process_sample(&dsmRight, _DACAMP_PCM_RIGHT(lastPcm));
+    *outSampleR = dsm_process_sample(&dsmRight, _DACAMP_DSM_PCM_RIGHT(lastPcm));
 #endif
 
     return true;
