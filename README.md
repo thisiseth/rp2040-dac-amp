@@ -35,9 +35,9 @@ requiring only 6 MOSFETs per channel with some resistors and a low-pass output f
 
 It was interesting to understand how modern digital-to-analog sound conversion is made, but although general concepts are mostly the same, 
 even the cheapest modern DAC is much, much more advanced than a software no-FPU-MCU solution ever could be, 
-starting from oversampling which should be at least 64x, certainly more than 1-bit quantization (up to 6 bits according to wiki), enermous gate currents if you want some amplification too etc.
+starting from the oversampling which should be at least 64x, certainly more than 1-bit quantization (up to 6 bits according to wiki), enermous gate currents if you want some amplification too etc.
 
-But to my surprise the sound is absolutely tolerable if you crank the volume above the screeching noise floor, 
+But to my surprise the sound is absolutely tolerable, especially if you crank the volume up above the screeching noise floor, 
 and it is cute and smells of rosin when heated!
 
 ## What can and can not be improved
