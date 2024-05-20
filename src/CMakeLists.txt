@@ -38,5 +38,7 @@ target_link_libraries(rp2040_dac_amp PUBLIC
     pico_platform
 )
 
+pico_set_binary_type(rp2040_dac_amp copy_to_ram)
+
 # create map/bin/hex/uf2 file in addition to ELF.
 pico_add_extra_outputs(rp2040_dac_amp)

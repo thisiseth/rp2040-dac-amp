@@ -63,7 +63,7 @@
 
 static volatile bool isEnabledRequested;
 
-static uint32_t pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH];
+static uint32_t __aligned(4) pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH];
 static ringbuf_t pcmRing;
 
 static dsm_t dsmLeft, dsmRight;
@@ -73,7 +73,7 @@ static uint32_t lastPcm;
 #define _DACAMP_PCM_LEFT(pcm) ((int16_t)(pcm))
 #define _DACAMP_PCM_RIGHT(pcm) ((int16_t)((pcm) >> 16))
 
-spin_lock_t *pcmLock;
+auto_init_mutex(pcmMutex);
 
 static void core1_worker(void);
 static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool allowRepeatPrevious);
@@ -91,8 +91,6 @@ void dacamp_init(void)
 
     ringbuf_init(&pcmRing, &pcmRingInternalBuffer, PCM_RING_BUFFER_DEPTH, sizeof(uint32_t));
 
-    pcmLock = spin_lock_init(spin_lock_claim_unused(true));
-
     multicore_launch_core1(core1_worker);
 }
 
@@ -105,11 +103,11 @@ void dacamp_stop(void)
 {
     isEnabledRequested = false;
 
-    uint32_t irq = spin_lock_blocking(pcmLock);
+    mutex_enter_blocking(&pcmMutex);
 
     ringbuf_clear(&pcmRing);
 
-    spin_unlock(pcmLock, irq);
+    mutex_exit(&pcmMutex);
 }
 
 int dacamp_pcm_put(uint32_t* samples, int sampleCount)
@@ -117,11 +115,11 @@ int dacamp_pcm_put(uint32_t* samples, int sampleCount)
     if (!isEnabledRequested)
         return sampleCount; //discard
 
-    uint32_t irq = spin_lock_blocking(pcmLock);
+    mutex_enter_blocking(&pcmMutex);
 
     int ret = ringbuf_put(&pcmRing, samples, sampleCount);
 
-    spin_unlock(pcmLock, irq);
+    mutex_exit(&pcmMutex);
 
     return ret;
 }
@@ -136,7 +134,7 @@ static void core1_worker(void)
     bool isEnabledActual = false;
     bool refillBuffers = false;
 
-    uint64_t pioRingInternalBuf[PIO_RING_BUFFER_DEPTH];
+    uint64_t __aligned(4) pioRingInternalBuf[PIO_RING_BUFFER_DEPTH];
     ringbuf_t pioRing;
 
     ringbuf_init(&pioRing, pioRingInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint64_t));
@@ -193,17 +191,17 @@ static void core1_worker(void)
 
 static inline bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool doNotRepeatPrevious)
 {
-    uint32_t irq = spin_lock_blocking(pcmLock);
+    mutex_enter_blocking(&pcmMutex);
 
     bool success = ringbuf_get_one(&pcmRing, &lastPcm);
 
-    spin_unlock(pcmLock, irq);
+    mutex_exit(&pcmMutex);
 
     if (!success && doNotRepeatPrevious)
         return false;
 
     *outSampleL = dsm_process_sample(&dsmLeft, _DACAMP_PCM_LEFT(lastPcm));
-#if 1//#ifdef HBRIDGE_STEREO
+#ifdef HBRIDGE_STEREO
     *outSampleR = dsm_process_sample(&dsmRight, _DACAMP_PCM_RIGHT(lastPcm));
 #endif
 

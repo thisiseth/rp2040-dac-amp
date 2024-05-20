@@ -26,7 +26,7 @@ static inline void dsm_reset(dsm_t* ptr)
 
 #define _DSM_INT_MAX                (0x7FFF << 8)
 #define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time
-#define _DSM_INT16_TO_INT32(a)      ((((int32_t)(a))*3) << 6) //limit modulator input to 75%
+#define _DSM_INT16_TO_INT32(a)      ((((int32_t)(a)) * 45) << 2) //limit modulator input to 45/64= ~71%
 
 #define _DSM_QUANTIZE(a)                ((a) ? _DSM_INT_MAX : (-_DSM_INT_MAX))
 #define _DSM_QUANTIZE_SHORT_PULSE(a)    ((a) ? _DSM_INT_MAX_SHORT_PULSE : (-_DSM_INT_MAX_SHORT_PULSE))
