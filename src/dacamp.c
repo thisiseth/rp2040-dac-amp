@@ -59,7 +59,7 @@
 #define PIO_TX_FIFO_DEPTH 8
 #define PIO_RING_BUFFER_DEPTH 32 //allow buffering of up to N processed pio samples, should be at least PIO_TX_FIFO_DEPTH in size
 
-#define PCM_RING_BUFFER_DEPTH 4096
+#define PCM_RING_BUFFER_DEPTH 2048
 
 #define PCM_TO_DSM_PCM_BUFFER_LENGTH 256
 
@@ -72,7 +72,7 @@ static dsm_t dsmLeft, dsmRight;
 
 static uint64_t lastPcm;
 
-auto_init_mutex(pcmMutex);
+static spin_lock_t *pcmSpinlock;
 
 static uint64_t pcmToDsmPcmBuffer[PCM_TO_DSM_PCM_BUFFER_LENGTH];
 
@@ -87,8 +87,9 @@ static uint64_t pcmToDsmPcmBuffer[PCM_TO_DSM_PCM_BUFFER_LENGTH];
 #define _DACAMP_DSM_PCM(left, right)    (((uint64_t)(left & 0xFFFFFFFF)) | (((uint64_t)((right)) << 32)))
 
 static void core1_worker(void);
-static bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool allowRepeatPrevious);
-static void dacamp_panic();
+static bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bool doNotRepeatPrevious);
+static void dacamp_panic(void);
+static void dacamp_init_cringe_debug(void);
 
 void dacamp_init(void)
 {
@@ -102,6 +103,8 @@ void dacamp_init(void)
 
     ringbuf_init(&pcmRing, &pcmRingInternalBuffer, PCM_RING_BUFFER_DEPTH, sizeof(uint64_t));
 
+    pcmSpinlock = spin_lock_init(spin_lock_claim_unused(true));
+
     multicore_launch_core1(core1_worker);
 }
 
@@ -114,20 +117,20 @@ void dacamp_stop(void)
 {
     isEnabledRequested = false;
 
-    mutex_enter_blocking(&pcmMutex);
+    uint32_t irq = spin_lock_blocking(pcmSpinlock);
 
     ringbuf_clear(&pcmRing);
 
-    mutex_exit(&pcmMutex);
+    spin_unlock(pcmSpinlock, irq);
 }
 
 void dacamp_flush(void)
 {
-    mutex_enter_blocking(&pcmMutex);
+    uint32_t irq = spin_lock_blocking(pcmSpinlock);
 
     ringbuf_clear(&pcmRing);
 
-    mutex_exit(&pcmMutex);
+    spin_unlock(pcmSpinlock, irq);
 
     isFlushRequested = true;
 }
@@ -174,11 +177,11 @@ int dacamp_pcm_put(uint32_t *samples, int sampleCount, int sampleSize)
             pcmToDsmPcmBuffer[i] = _DACAMP_DSM_PCM(sampleLeft, sampleRight);
         }
 
-        mutex_enter_blocking(&pcmMutex);
+        spin_lock_unsafe_blocking(pcmSpinlock);
 
         int samplesWritten = ringbuf_put(&pcmRing, pcmToDsmPcmBuffer, samplesToWrite);
 
-        mutex_exit(&pcmMutex);
+        spin_unlock_unsafe(pcmSpinlock);
 
         ret += samplesWritten;
 
@@ -202,12 +205,12 @@ static void core1_worker(void)
     bool isEnabledActual = false;
     bool refillBuffers = false;
 
-    uint64_t pioRingInternalBuf[PIO_RING_BUFFER_DEPTH];
+    uint64_t pioRingInternalBuf[2*PIO_RING_BUFFER_DEPTH];
     ringbuf_t pioRing;
 
-    ringbuf_init(&pioRing, pioRingInternalBuf, PIO_RING_BUFFER_DEPTH, sizeof(uint64_t));
+    ringbuf_init(&pioRing, pioRingInternalBuf, PIO_RING_BUFFER_DEPTH, 2*sizeof(uint64_t));
 
-    uint32_t pioSample[2];
+    uint64_t pioSample[2];
 
     while (1) {
         isEnabled = isEnabledRequested;
@@ -222,7 +225,7 @@ static void core1_worker(void)
                 refillBuffers = true;
                 lastPcm = 0;
 
-                hbridge_program_start(PIO, SM_LEFT, SM_RIGHT);
+                hbridge_program_start(PIO, offset, SM_LEFT, SM_RIGHT);
             }
             else 
                 hbridge_program_stop(PIO, SM_LEFT, SM_RIGHT);
@@ -242,7 +245,7 @@ static void core1_worker(void)
                 refillBuffers = true;
                 lastPcm = 0;
 
-                hbridge_program_start(PIO, SM_LEFT, SM_RIGHT);
+                hbridge_program_start(PIO, offset, SM_LEFT, SM_RIGHT);
             }
 
             isFlushRequested = false;
@@ -255,14 +258,16 @@ static void core1_worker(void)
             refillBuffers = false;
 
         if (!refillBuffers)
-            while (!pio_sm_is_tx_fifo_full(PIO, SM_LEFT) && ringbuf_get_one(&pioRing, pioSample))
+            while (pio_sm_get_tx_fifo_level(PIO, SM_LEFT) <= (PIO_TX_FIFO_DEPTH - 2) && ringbuf_get_one(&pioRing, pioSample))
             {   
                 // assuming we already fill right first and left second, 
                 //and they consume bits at the same rate, left will always be 'fuller'
 #ifdef HBRIDGE_STEREO
-                pio_sm_put(PIO, SM_RIGHT, pioSample[1]);
+                pio_sm_put(PIO, SM_RIGHT, (uint32_t)(pioSample[1] >> 32));
+                pio_sm_put(PIO, SM_RIGHT, (uint32_t)pioSample[1]);
 #endif
-                pio_sm_put(PIO, SM_LEFT, pioSample[0]);
+                pio_sm_put(PIO, SM_LEFT, (uint32_t)(pioSample[0] >> 32));
+                pio_sm_put(PIO, SM_LEFT, (uint32_t)pioSample[0]);
             }
 
         if (ringbuf_is_full(&pioRing))
@@ -275,13 +280,13 @@ static void core1_worker(void)
     }
 }
 
-static inline bool process_sample(uint32_t *outSampleL, uint32_t *outSampleR, bool doNotRepeatPrevious)
+static inline bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bool doNotRepeatPrevious)
 {
-    mutex_enter_blocking(&pcmMutex);
+    uint32_t irq = spin_lock_blocking(pcmSpinlock);
 
     bool success = ringbuf_get_one(&pcmRing, &lastPcm);
 
-    mutex_exit(&pcmMutex);
+    spin_unlock(pcmSpinlock, irq);
 
     if (!success && doNotRepeatPrevious)
         return false;
@@ -302,4 +307,29 @@ static void dacamp_panic(void)
     gpio_put(25, 1);
 
     panic("dacamp panic");
+}
+
+#define CRINGE_DEBUG_LED1 4
+#define CRINGE_DEBUG_LED2 5
+
+static void dacamp_init_cringe_debug(void)
+{
+    gpio_init(CRINGE_DEBUG_LED1);
+    gpio_init(CRINGE_DEBUG_LED2);
+    gpio_set_dir(CRINGE_DEBUG_LED1, GPIO_OUT);
+    gpio_set_dir(CRINGE_DEBUG_LED2, GPIO_OUT);
+    gpio_set_drive_strength(CRINGE_DEBUG_LED1, GPIO_DRIVE_STRENGTH_2MA);
+    gpio_set_drive_strength(CRINGE_DEBUG_LED1, GPIO_DRIVE_STRENGTH_2MA);
+}
+
+void dacamp_debug_stuff_task(void)
+{
+    uint32_t irq = spin_lock_blocking(pcmSpinlock);
+
+    uint32_t level = ringbuf_filled_slots(&pcmRing);
+
+    spin_unlock(pcmSpinlock, irq);
+
+    gpio_put(CRINGE_DEBUG_LED1, level > 30);
+    gpio_put(CRINGE_DEBUG_LED2, level == 0);
 }

@@ -14,26 +14,26 @@
 
 #define _DSM_INT_MAX                (0x7FFF << 8)
 #define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time (?)
-
-#define _DSM_QUANTIZE(a)                ((a) ? _DSM_INT_MAX : (-_DSM_INT_MAX))
-#define _DSM_QUANTIZE_SHORT_PULSE(a)    ((a) ? _DSM_INT_MAX_SHORT_PULSE : (-_DSM_INT_MAX_SHORT_PULSE))
+#define _DSM_ZERO_THRESHOLD         ((int32_t)0x00000000)
 
 typedef struct dsm
 {
     int32_t prevSample;
     int32_t integrator[4];
-    uint32_t prevOutputHigh;
-    
+    uint32_t prevOutput;
+
 #ifdef DSM_INTEGRATOR_METRICS //only for local PC simulation
     int32_t integratorMax[4];
     int32_t integratorMin[4];
+    int32_t quantizerMax;
+    int32_t quantizerMin;
 #endif
 } dsm_t;
 
 static void dsm_init(dsm_t* ptr)
 {
     ptr->prevSample = 0;
-    ptr->prevOutputHigh = 0;
+    ptr->prevOutput = 0xFFFFFFFF;
     memset(ptr->integrator, 0, sizeof(int32_t) * 4);
 
 #ifdef DSM_INTEGRATOR_METRICS
@@ -74,20 +74,46 @@ static inline void dsm_reset(dsm_t* ptr)
 //watning: optimizations
 static inline uint32_t _dsm_calculate(dsm_t* ptr, int32_t input)
 {
-    uint32_t outputHigh = 
-        (_DSM_A1(ptr->integrator[0]) +
-         _DSM_A2(ptr->integrator[1]) +
-         _DSM_A3(ptr->integrator[2]) +
-         _DSM_A4(ptr->integrator[3]) +
-         _DSM_B5(input)) > 0;
+    int32_t quantizerInput = _DSM_A1(ptr->integrator[0]) +
+        _DSM_A2(ptr->integrator[1]) +
+        _DSM_A3(ptr->integrator[2]) +
+        _DSM_A4(ptr->integrator[3]) +
+        _DSM_B5(input);
 
-    int32_t output = outputHigh == ptr->prevOutputHigh
-        ? _DSM_QUANTIZE(outputHigh)
-        : _DSM_QUANTIZE_SHORT_PULSE(outputHigh);
+#ifdef DSM_INTEGRATOR_METRICS
+    if (quantizerInput > ptr->quantizerMax)
+        ptr->quantizerMax = quantizerInput;
 
-    ptr->prevOutputHigh = outputHigh;
+    if (quantizerInput < ptr->quantizerMin)
+        ptr->quantizerMin = quantizerInput;
+#endif
 
-    ptr->integrator[0] += _DSM_B1(input) - _DSM_C1(output) - _DSM_G1(ptr->integrator[1]);
+    uint32_t dsmOutput;
+    int32_t quantizerOutput;
+
+    if (quantizerInput <= -_DSM_ZERO_THRESHOLD)
+    {
+        dsmOutput = 0b10;
+        quantizerOutput = ptr->prevOutput == dsmOutput 
+            ? -_DSM_INT_MAX 
+            : -_DSM_INT_MAX_SHORT_PULSE;
+    }
+    else if (quantizerInput > _DSM_ZERO_THRESHOLD)
+    {
+        dsmOutput = 0b01;
+        quantizerOutput = ptr->prevOutput == dsmOutput 
+            ? _DSM_INT_MAX 
+            : _DSM_INT_MAX_SHORT_PULSE;
+    }
+    else 
+    {
+        dsmOutput = 0b00;
+        quantizerOutput = 0;
+    }
+
+    ptr->prevOutput = dsmOutput;
+
+    ptr->integrator[0] += _DSM_B1(input) - _DSM_C1(quantizerOutput) - _DSM_G1(ptr->integrator[1]);
     ptr->integrator[1] += _DSM_B2(input) + _DSM_C2(ptr->integrator[0]);
     ptr->integrator[2] += _DSM_B3(input) + _DSM_C3(ptr->integrator[1]) - _DSM_G2(ptr->integrator[2]);
     ptr->integrator[3] += _DSM_B4(input) + _DSM_C4(ptr->integrator[2]);
@@ -103,29 +129,42 @@ static inline uint32_t _dsm_calculate(dsm_t* ptr, int32_t input)
     }
 #endif
 
-    return outputHigh;
+    return dsmOutput;
 }
 
-static uint32_t dsm_process_sample(dsm_t* ptr, int32_t dsmPcm)
+static uint64_t dsm_process_sample(dsm_t* ptr, int32_t dsmPcm)
 {
-    uint32_t ret = 0;
+    uint32_t retLow = 0, retHigh = 0;
 
     //linear interpolation with 1 sample delay
     int32_t sample = ptr->prevSample;
     int32_t step = (dsmPcm - sample) >> 5; // / 32
 
-    ptr->prevSample = dsmPcm;        
-    
-    ret |= _dsm_calculate(ptr, sample);
+    ptr->prevSample = dsmPcm;
+
+    retHigh |= _dsm_calculate(ptr, sample);
     sample += step;
 
-    for (int i = 0; i < 31; ++i)
+#pragma GCC unroll 15
+    for (int i = 0; i < 15; ++i)
     {
-        ret <<= 1;
+        retHigh <<= 2;
 
-        ret |= _dsm_calculate(ptr, sample);
+        retHigh |= _dsm_calculate(ptr, sample);
         sample += step;
     }
 
-    return ret;
+    retLow |= _dsm_calculate(ptr, sample);
+    sample += step;
+
+#pragma GCC unroll 15
+    for (int i = 0; i < 15; ++i)
+    {
+        retLow <<= 2;
+
+        retLow |= _dsm_calculate(ptr, sample);
+        sample += step;
+    }
+
+    return ((uint64_t)retHigh) << 32 | retLow;
 }

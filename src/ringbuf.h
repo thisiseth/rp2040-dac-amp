@@ -98,8 +98,7 @@ static inline bool ringbuf_put_one(ringbuf_t* ptr, const void* element)
     else if (ptr->elementSize == 8)
         ((uint64_t*)ptr->buf)[ptr->endIdx] = *(uint64_t*)element;
     else
-        for (int i = 0; i < ptr->elementSize; ++i)
-            ptr->buf[ptr->endIdx * ptr->elementSize + i] = ((const char*)element)[i];
+        memcpy(ptr->buf + ptr->endIdx * ptr->elementSize, element, ptr->elementSize);
 
     ++ptr->endIdx;
     ptr->isEmpty = false;
@@ -153,8 +152,7 @@ static inline bool ringbuf_get_one(ringbuf_t* ptr, void* element)
     else if (ptr->elementSize == 8)
         *(uint64_t*)element = ((uint64_t*)ptr->buf)[ptr->startIdx];
     else
-        for (int i = 0; i < ptr->elementSize; ++i)
-            ((char*)element)[i] = ptr->buf[ptr->startIdx * ptr->elementSize + i];
+        memcpy(element, ptr->buf + ptr->startIdx * ptr->elementSize, ptr->elementSize);
 
     ++ptr->startIdx;
 

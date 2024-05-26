@@ -109,7 +109,7 @@ char const *string_desc_arr[] =
         "RP2040 DAC-Amp Combo",     // 2: Product
         NULL,                       // 3: Serials, should use chip ID
         "Speakers",                 // 4: Audio Interface
-        NULL,       // 5: Audio Interface
+        NULL,                       // 5: Audio Interface ???
 };
 
 static uint16_t _desc_str[32];

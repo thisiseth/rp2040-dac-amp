@@ -12,23 +12,35 @@
 ; BRIDGE_MINUS is 0b11110000, but set is limited to only 5 bits
 ;so we'll have to use mov with bit-inversion
 
+mov y, ~null
+
+;                 out pins:  76543210
+.define public BRIDGE_ZERO 0b00110011 ; this value is preloaded at sm restart
+; BRIDGE_ZERO
+out isr, 32
+
 .wrap_target
 read_data:
-    out x, 1
+    out x, 2
     jmp x!=y set_output
     jmp read_data [T_PULSE_CLOCKS - 3]
 set_output:
     mov y, x
+    jmp x-- set_plus ;no jump if initial input == 0b00
+    mov pins, null [T_DEAD_CLOCKS - 1]
+    mov pins, isr ;BRIDGE_ZERO
+    jmp read_data [T_ACTIVE_CLOCKS - 6]
+set_plus:
+    jmp x-- set_minus ;no jump if initial input == 0b01
     set x, BRIDGE_PLUS
-    jmp !y set_minus
-;set_plus
     mov pins, null [T_DEAD_CLOCKS - 1]
     mov pins, x ;BRIDGE_PLUS
-    jmp read_data [T_ACTIVE_CLOCKS - 7]
-set_minus:
+    jmp read_data [T_ACTIVE_CLOCKS - 8]
+set_minus: ;initial input is 0b10 or 0b11
+    set x, BRIDGE_PLUS
     mov pins, null [T_DEAD_CLOCKS - 1]
     mov pins, ~x ;BRIDGE_MINUS
-    jmp read_data [T_ACTIVE_CLOCKS - 7]
+    jmp read_data [T_ACTIVE_CLOCKS - 8]
 
 % c-sdk {
 #define HBRIDGE_CHANNEL_PIN_LENGTH 8
@@ -41,7 +53,10 @@ static inline void _hbridge_program_init_channel(PIO pio, uint sm, uint offset, 
     pio_sm_set_consecutive_pindirs(pio, sm, pin, HBRIDGE_CHANNEL_PIN_LENGTH, true);
 
     for (int i = 0; i < HBRIDGE_CHANNEL_PIN_LENGTH; ++i)
+    {
         gpio_set_drive_strength(pin + i, GPIO_DRIVE_STRENGTH_12MA);
+        gpio_set_slew_rate(pin + i, GPIO_SLEW_RATE_FAST);
+    }
 
     pio_sm_config c = hbridge_program_get_default_config(offset);
 
@@ -82,27 +97,40 @@ static inline bool hbridge_program_init(PIO pio, uint smLeft, uint smRight, uint
     return true;
 }
 
-static inline void hbridge_program_start(PIO pio, uint smLeft, uint smRight) 
+static inline void hbridge_program_start(PIO pio, uint offset, uint smLeft, uint smRight) 
 {
+    pio_sm_drain_tx_fifo(pio, smLeft);
     int mask = 1 << smLeft;
+
 #ifdef HBRIDGE_STEREO   
-    mask += 1 << smRight;
+    pio_sm_drain_tx_fifo(pio, smRight);
+    mask |= 1 << smRight;
 #endif
 
     //restart in sync for no real reason because of feeding the fifos not simultaneously
     pio_restart_sm_mask(pio, mask);
+
+    pio_sm_exec(pio, smLeft, pio_encode_jmp(offset));
+
+    //preload hbridge_BRIDGE_ZERO which is bigger than 5 bits
+    pio_sm_put(pio, smLeft, hbridge_BRIDGE_ZERO);
+
+#ifdef HBRIDGE_STEREO 
+    pio_sm_exec(pio, smRight, pio_encode_jmp(offset));
+
+    pio_sm_put(pio, smRight, hbridge_BRIDGE_ZERO);
+#endif
+
     pio_enable_sm_mask_in_sync(pio, mask);
 }
 
 static inline void hbridge_program_stop(PIO pio, uint smLeft, uint smRight) 
 {
     pio_sm_set_enabled(pio, smLeft, false);
-    pio_sm_drain_tx_fifo(pio, smLeft);
     pio_sm_set_pins(pio, smLeft, 0);
 
 #ifdef HBRIDGE_STEREO    
     pio_sm_set_enabled(pio, smRight, false);
-    pio_sm_drain_tx_fifo(pio, smRight);
     pio_sm_set_pins(pio, smRight, 0);
 #endif
 }

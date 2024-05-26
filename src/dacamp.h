@@ -10,6 +10,8 @@ void dacamp_stop(void);
 
 void dacamp_flush(void);
 
+void dacamp_debug_stuff_task(void);
+
 //samples is an array of LR 16 bit or 24 (stored as 32) bit sample pairs
 //sampleSize is 4 for PCM16 or 8 for PCM24
 //L = sample&0xFFFF, R = sample >> 16 

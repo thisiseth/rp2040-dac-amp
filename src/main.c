@@ -398,16 +398,25 @@ void audio_task(void)
 //--------------------------------------------------------------------+
 // BLINKING TASK
 //--------------------------------------------------------------------+
+
+
+#include "hardware/pio.h"
+
+
 void led_blinking_task(void)
 {
-    static uint32_t start_ms = 0;
-    static bool led_state = false;
+    // static uint32_t start_ms = 0;
+    // static bool led_state = false;
 
-    // Blink every interval ms
-    if (board_millis() - start_ms < blink_interval_ms)
-        return;
-    start_ms += blink_interval_ms;
+    // // Blink every interval ms
+    // if (board_millis() - start_ms < blink_interval_ms)
+    //     return;
+    // start_ms += blink_interval_ms;
 
-    board_led_write(led_state);
-    led_state = 1 - led_state;
+    // board_led_write(led_state);
+    //led_state = 1 - led_state;
+
+    board_led_write(pio_sm_get_tx_fifo_level(pio0, 1) == 8);
+
+    dacamp_debug_stuff_task();
 }
