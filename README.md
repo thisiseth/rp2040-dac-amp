@@ -30,7 +30,96 @@ requiring only 6 MOSFETs per channel with some resistors and a low-pass output f
 * Now in stereo!
 * Still haven't implemented volume and mute
 * Supports 16 and 24 bitdepths at 48 KHz, 96 KHz is in progress. Higher is not possible due to full-speed USB limits
+  
+## How to 
 
+### Build (firmware)
+
+The project is intended to be built using standard Pi Pico C/C++ SDK cmake scripts. Please refer to the [Pico SDK doc](https://github.com/raspberrypi/pico-sdk/) for more
+
+*(linux/wsl2, for other platforms refer to the SDK doc)*
+
+1. Install CMake (at least version 3.13), and GCC cross compiler
+   ```
+   sudo apt install cmake gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+   ```
+2. Get a copy of Pi Pico SDK with submodules (you need tinyUSB)
+   ```
+   git clone --recurse-submodules https://github.com/raspberrypi/pico-sdk.git
+   ```
+4. Set `PICO_SDK_PATH` to the SDK location in your environment, or pass it (`-DPICO_SDK_PATH=`) to cmake later
+5. Clone this repo, go to /src/ (where CMakeLists.txt resides) and create a CMake build directory there
+   ```
+   /src$       mkdir build
+   /src$       cd build
+   /src/build$ cmake .. <add -DPICO_SDK_PATH= here if you do not use env variable>
+   ```
+6. Build the project
+   ```
+   /src/build$ make rp2040_dac_amp
+   ```
+7. All build artifacts will be placed to /src/build/, including
+   ```
+   /src/build/rp2040_dac_amp.uf2 <- firmware
+   /src/build/rp2040_dac_amp.dis <- disassembly if you are interested
+   ```
+
+### Build (hardware)
+
+By default left channel H-bridge is connected to GPIO 6-13, right channel H-bridge is connected to GPIO 14-21. 
+Each signal is 2 pins wide to get more current to drive the transistors
+
+The wiring is (please also check the code comments):
+```
+                 left channel                      right channel
+GPIO      6  7    8  9   10  11  12  13     14  15  16  17  18  19  20  21
+          |__|    |__|    |__|    |__|       |__|    |__|    |__|    |__|
+           |       |       |       |          |       |       |       |
+H-bridge   L-      H+      L+      H-         L-      H+      L+      H-
+```
+
+Where each H-bridge is (pulldown resistors omitted)
+```
+            "plus side"                           "minus side"
+ +5V from usb __________________________________________
+                 |       |                     |       |
+                100R     |                     |     100R                "high side"
+                 |----P-mosfet             P-mosfet----|   
+    H(igh)+ --N-mosfet   |                     |    N-mosfet-- H(igh)-
+           +0V __|       |____Load+   Load-____|       |__ +0V
+                         |                     |
+    L(ow)+ -----------N-mosfet             N-mosfet------------ L(ow)-   "low side"
+                         |                     |
+                   +0V -------------------------
+```
+
+Using an H-bridge we can get +5V, -5V, 0V and "not connected" at load terminals:
+```
+           L- H+ L+ H-       Load
+H-bridge   0  0  0  0        not connected - high impedance
+           1  1  0  0        +5V
+           0  0  1  1        -5V
+           1  0  1  0         0V
+           0  1  0  1         0V
+          _______________________
+           
+           *  1  1  *         short circuit, blown transistors
+           1  *  *  1         or psu goes into protection mode:
+                              if both transitors of left or right side are open
+                              you just short +5V to 0V
+```
+
+And the last step is connect the speakers to the load terminals of the H-bridge through a low-pass LC filter, 
+use whatever values are laying around, aim at ~30kHz cutoff 
+```
+  H-bridge                Speaker
+   Load+ ----L=5.6uH----- Speaker+
+                       |
+                    c=2.2uF (ceramic/film)
+                       |
+   Load- ---------------- Speaker-
+```
+  
 ## Conclusions
 
 It was interesting to understand how modern digital-to-analog sound conversion is made, but although general concepts are mostly the same, 
