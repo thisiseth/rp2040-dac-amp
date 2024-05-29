@@ -105,6 +105,8 @@ void dacamp_init(void)
 
     pcmSpinlock = spin_lock_init(spin_lock_claim_unused(true));
 
+    dacamp_init_cringe_debug();
+    
     multicore_launch_core1(core1_worker);
 }
 
