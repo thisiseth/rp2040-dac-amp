@@ -132,7 +132,7 @@ static inline uint32_t _dsm_calculate(dsm_t* ptr, int32_t input)
     return dsmOutput;
 }
 
-static uint64_t dsm_process_sample(dsm_t* ptr, int32_t dsmPcm)
+static uint64_t dsm_process_sample_x32(dsm_t* ptr, int32_t dsmPcm)
 {
     uint32_t retLow = 0, retHigh = 0;
 
@@ -153,6 +153,46 @@ static uint64_t dsm_process_sample(dsm_t* ptr, int32_t dsmPcm)
         retHigh |= _dsm_calculate(ptr, sample);
         sample += step;
     }
+
+    retLow |= _dsm_calculate(ptr, sample);
+    sample += step;
+
+#pragma GCC unroll 15
+    for (int i = 0; i < 15; ++i)
+    {
+        retLow <<= 2;
+
+        retLow |= _dsm_calculate(ptr, sample);
+        sample += step;
+    }
+
+    return ((uint64_t)retHigh) << 32 | retLow;
+}
+
+static uint64_t dsm_process_sample_x16(dsm_t* ptr, int32_t firstDsmPcm, int32_t secondDsmPcm)
+{
+    uint32_t retLow = 0, retHigh = 0;
+
+    //linear interpolation with 1 sample delay
+    int32_t sample = ptr->prevSample;
+    int32_t step = (firstDsmPcm - sample) >> 4; // / 16
+
+    ptr->prevSample = secondDsmPcm;
+
+    retHigh |= _dsm_calculate(ptr, sample);
+    sample += step;
+
+#pragma GCC unroll 15
+    for (int i = 0; i < 15; ++i)
+    {
+        retHigh <<= 2;
+
+        retHigh |= _dsm_calculate(ptr, sample);
+        sample += step;
+    }
+
+    sample = firstDsmPcm;
+    step = (secondDsmPcm - sample) >> 4; // / 16
 
     retLow |= _dsm_calculate(ptr, sample);
     sample += step;

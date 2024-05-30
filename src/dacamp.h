@@ -4,7 +4,9 @@
 
 void dacamp_init(void);
 
-void dacamp_start(void);
+void dacamp_start(uint32_t sampleRate);
+
+void dacamp_change_sample_rate(uint32_t sampleRate);
 
 void dacamp_stop(void);
 

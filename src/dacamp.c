@@ -64,6 +64,7 @@
 #define PCM_TO_DSM_PCM_BUFFER_LENGTH 256
 
 static volatile bool isEnabledRequested = false, isFlushRequested = false;
+static volatile uint32_t requestedSampleRate;
 
 static uint64_t pcmRingInternalBuffer[PCM_RING_BUFFER_DEPTH];
 static ringbuf_t pcmRing;
@@ -87,7 +88,7 @@ static uint64_t pcmToDsmPcmBuffer[PCM_TO_DSM_PCM_BUFFER_LENGTH];
 #define _DACAMP_DSM_PCM(left, right)    (((uint64_t)(left & 0xFFFFFFFF)) | (((uint64_t)((right)) << 32)))
 
 static void core1_worker(void);
-static bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bool doNotRepeatPrevious);
+static bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bool doNotRepeatPrevious, bool sampleRate96k);
 static void dacamp_panic(void);
 static void dacamp_init_cringe_debug(void);
 
@@ -110,14 +111,22 @@ void dacamp_init(void)
     multicore_launch_core1(core1_worker);
 }
 
-void dacamp_start(void)
+void dacamp_start(uint32_t sampleRate)
 {
+    requestedSampleRate = sampleRate;
     isEnabledRequested = true;
+}
+
+void dacamp_change_sample_rate(uint32_t sampleRate)
+{
+    requestedSampleRate = sampleRate;
+    dacamp_flush();
 }
 
 void dacamp_stop(void)
 {
     isEnabledRequested = false;
+    isFlushRequested = true;
 
     uint32_t irq = spin_lock_blocking(pcmSpinlock);
 
@@ -203,7 +212,7 @@ static void core1_worker(void)
     if (!hbridge_program_init(PIO, SM_LEFT, SM_RIGHT, offset, HBRIDGE_LEFT_START_PIN, HBRIDGE_RIGHT_START_PIN))
         dacamp_panic();
 
-    bool isEnabled;
+    bool isEnabled, sampleRate96k;
     bool isEnabledActual = false;
     bool refillBuffers = false;
 
@@ -227,6 +236,8 @@ static void core1_worker(void)
                 refillBuffers = true;
                 lastPcm = 0;
 
+                sampleRate96k = requestedSampleRate == 96000;
+
                 hbridge_program_start(PIO, offset, SM_LEFT, SM_RIGHT);
             }
             else 
@@ -246,6 +257,8 @@ static void core1_worker(void)
                 ringbuf_clear(&pioRing);
                 refillBuffers = true;
                 lastPcm = 0;
+
+                sampleRate96k = requestedSampleRate == 96000;
 
                 hbridge_program_start(PIO, offset, SM_LEFT, SM_RIGHT);
             }
@@ -275,30 +288,69 @@ static void core1_worker(void)
         if (ringbuf_is_full(&pioRing))
             continue;
 
-        if (!process_sample(&pioSample[0], &pioSample[1], !ringbuf_is_empty(&pioRing) || refillBuffers))
+        if (!process_sample(&pioSample[0], &pioSample[1], !ringbuf_is_empty(&pioRing) || refillBuffers, sampleRate96k))
             continue;
 
         ringbuf_put_one(&pioRing, pioSample);
     }
 }
 
-static inline bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bool doNotRepeatPrevious)
+static inline bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bool doNotRepeatPrevious, bool sampleRate96k)
 {
-    uint32_t irq = spin_lock_blocking(pcmSpinlock);
+    if (sampleRate96k)
+    {
+        uint64_t firstPcm;
 
-    bool success = ringbuf_get_one(&pcmRing, &lastPcm);
+        uint32_t irq = spin_lock_blocking(pcmSpinlock);
 
-    spin_unlock(pcmSpinlock, irq);
+        bool success = ringbuf_filled_slots(&pcmRing) >= 2;
 
-    if (!success && doNotRepeatPrevious)
-        return false;
+        if (success)
+        {
+            ringbuf_get_one(&pcmRing, &firstPcm);
+            ringbuf_get_one(&pcmRing, &lastPcm);
+        }
 
-    *outSampleL = dsm_process_sample(&dsmLeft, _DACAMP_DSM_PCM_LEFT(lastPcm));
+        spin_unlock(pcmSpinlock, irq);
+
+        if (!success && doNotRepeatPrevious)
+            return false;
+
+        if (success)
+        {
+            *outSampleL = dsm_process_sample_x16(&dsmLeft, _DACAMP_DSM_PCM_LEFT(firstPcm), _DACAMP_DSM_PCM_LEFT(lastPcm));
 #ifdef HBRIDGE_STEREO
-    *outSampleR = dsm_process_sample(&dsmRight, _DACAMP_DSM_PCM_RIGHT(lastPcm));
+            *outSampleR = dsm_process_sample_x16(&dsmRight, _DACAMP_DSM_PCM_RIGHT(firstPcm), _DACAMP_DSM_PCM_RIGHT(lastPcm));
+#endif
+        }
+        else 
+        {
+            *outSampleL = dsm_process_sample_x32(&dsmLeft, _DACAMP_DSM_PCM_LEFT(lastPcm));
+#ifdef HBRIDGE_STEREO
+            *outSampleR = dsm_process_sample_x32(&dsmRight, _DACAMP_DSM_PCM_RIGHT(lastPcm));
+#endif
+        }
+
+        return true;        
+    }
+    else 
+    {
+        uint32_t irq = spin_lock_blocking(pcmSpinlock);
+
+        bool success = ringbuf_get_one(&pcmRing, &lastPcm);
+
+        spin_unlock(pcmSpinlock, irq);
+
+        if (!success && doNotRepeatPrevious)
+            return false;
+
+        *outSampleL = dsm_process_sample_x32(&dsmLeft, _DACAMP_DSM_PCM_LEFT(lastPcm));
+#ifdef HBRIDGE_STEREO
+        *outSampleR = dsm_process_sample_x32(&dsmRight, _DACAMP_DSM_PCM_RIGHT(lastPcm));
 #endif
 
-    return true;
+        return true;
+    }
 }
 
 static void dacamp_panic(void)

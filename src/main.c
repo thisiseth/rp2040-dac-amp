@@ -36,9 +36,7 @@
 #include "dacamp.h"
 
 // List of supported sample rates
-const uint32_t sample_rates[] = {48000 /* 44100, 48000, 88200, 96000*/};
-
-static uint32_t current_sample_rate = 48000; // 44100;
+const uint32_t sample_rates[] = {48000, /* 44100, 88200,*/ 96000};
 
 #define N_SAMPLE_RATES TU_ARRAY_SIZE(sample_rates)
 
@@ -93,6 +91,7 @@ const uint8_t sampleLengthPerFormat[CFG_TUD_AUDIO_FUNC_1_N_FORMATS] = {
 
 // Current resolution, update on format change
 static uint8_t currentSampleLength;
+static uint32_t currentSampleRate = 48000; // 44100;
 
 void led_blinking_task(void);
 void audio_task(void);
@@ -161,9 +160,9 @@ static bool tud_audio_clock_get_request(uint8_t rhport, audio_control_request_t 
     {
         if (request->bRequest == AUDIO_CS_REQ_CUR)
         {
-            TU_LOG1("Clock get current freq %lu\r\n", current_sample_rate);
+            TU_LOG1("Clock get current freq %lu\r\n", currentSampleRate);
 
-            audio_control_cur_4_t curf = {(int32_t)tu_htole32(current_sample_rate)};
+            audio_control_cur_4_t curf = {(int32_t)tu_htole32(currentSampleRate)};
             return tud_audio_buffer_and_schedule_control_xfer(rhport, (tusb_control_request_t const *)request, &curf, sizeof(curf));
         }
         else if (request->bRequest == AUDIO_CS_REQ_RANGE)
@@ -207,9 +206,11 @@ static bool tud_audio_clock_set_request(uint8_t rhport, audio_control_request_t 
     {
         TU_VERIFY(request->wLength == sizeof(audio_control_cur_4_t));
 
-        current_sample_rate = (uint32_t)((audio_control_cur_4_t const *)buf)->bCur;
+        currentSampleRate = (uint32_t)((audio_control_cur_4_t const *)buf)->bCur;
 
-        TU_LOG1("Clock set current freq: %ld\r\n", current_sample_rate);
+        dacamp_change_sample_rate(currentSampleRate);
+
+        TU_LOG1("Clock set current freq: %ld\r\n", currentSampleRate);
 
         return true;
     }
@@ -361,7 +362,7 @@ bool tud_audio_set_itf_cb(uint8_t rhport, tusb_control_request_t const *p_reques
         currentSampleLength = sampleLengthPerFormat[alt - 1];
 
         dacamp_flush();
-        dacamp_start();
+        dacamp_start(currentSampleRate);
 
         spk_data_size = 0;
     }
@@ -399,24 +400,18 @@ void audio_task(void)
 // BLINKING TASK
 //--------------------------------------------------------------------+
 
-
-#include "hardware/pio.h"
-
-
 void led_blinking_task(void)
 {
-    // static uint32_t start_ms = 0;
-    // static bool led_state = false;
+    static uint32_t start_ms = 0;
+    static bool led_state = false;
 
-    // // Blink every interval ms
-    // if (board_millis() - start_ms < blink_interval_ms)
-    //     return;
-    // start_ms += blink_interval_ms;
+    // Blink every interval ms
+    if (board_millis() - start_ms < blink_interval_ms)
+        return;
+    start_ms += blink_interval_ms;
 
-    // board_led_write(led_state);
-    //led_state = 1 - led_state;
-
-    board_led_write(pio_sm_get_tx_fifo_level(pio0, 1) == 8);
+    board_led_write(led_state);
+    led_state = 1 - led_state;
 
     dacamp_debug_stuff_task();
 }
