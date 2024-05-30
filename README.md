@@ -137,4 +137,5 @@ and it is cute and smells of rosin when heated!
 * Non-linear interpolation may improve the sound a bit
 * Non-breadboard variant can definitely be an improvement
 * Also i'm not sure my inductor assembly does its job and whether it affects the sound
+* No watchdogs or output protection implemented yet: sometimes tinyUSB just stops sending new data so the output stucks at some DC level
 
