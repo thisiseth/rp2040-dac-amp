@@ -29,7 +29,6 @@ requiring only 6 MOSFETs per channel with some resistors and a low-pass output f
   so it is more like +-3.5V, and like with any cheap speakers the advertised power is a bit overstated... for a full amplitude "0%" THD sine wave the estimation is 1.5 watts per channel with 4 ohm load
 * Now in stereo!
 * Supports 16 and 24 bitdepths at 48 and 96 kHz, 24/96 is the preferred mode to offload some of scaling and oversampling to your host device
-* Still haven't implemented volume and mute
 * Works with the type-c equipped iPhone 15 Pro LOL
   
 ## How to 
