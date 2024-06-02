@@ -2,6 +2,12 @@
 
 #include <stdint.h>
 
+#define DACAMP_VOLUME_STEP_BITS 7
+#define DACAMP_VOLUME_STEP (1 << DACAMP_VOLUME_STEP_BITS)
+#define DACAMP_MIN_VOLUME_DB (-50)
+#define DACAMP_VOLUME_PER_DB_UAC2 256 
+#define DACAMP_MIN_VOLUME_UAC2 (DACAMP_MIN_VOLUME_DB * DACAMP_VOLUME_PER_DB_UAC2)
+
 void dacamp_init(void);
 
 void dacamp_start(uint32_t sampleRate);
@@ -19,4 +25,4 @@ void dacamp_debug_stuff_task(void);
 //L = sample&0xFFFF, R = sample >> 16 
 //L = sample&0xFFFFFFFF, R = sample >> 32 
 //returns how many samples were written to the internal buffer
-int dacamp_pcm_put(uint32_t* samples, int sampleCount, int sampleSize);
+int dacamp_pcm_put(const uint32_t* samples, int sampleCount, int sampleSize, const int16_t *volume, const int8_t *mute);

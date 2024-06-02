@@ -99,12 +99,12 @@ void audio_task(void);
 /*------------- MAIN -------------*/
 int main(void)
 {
+    dacamp_init();
+    
     board_init();
 
     // init device stack on configured roothub port
     tud_init(BOARD_TUD_RHPORT);
-
-    dacamp_init();
 
     TU_LOG1("Headset running\r\n");
 
@@ -239,15 +239,15 @@ static bool tud_audio_feature_unit_get_request(uint8_t rhport, audio_control_req
         {
             audio_control_range_2_n_t(1) range_vol = {
                 .wNumSubRanges = tu_htole16(1),
-                .subrange[0] = {.bMin = tu_htole16(-VOLUME_CTRL_50_DB), tu_htole16(VOLUME_CTRL_0_DB), tu_htole16(256)}};
+                .subrange[0] = {.bMin = tu_htole16(DACAMP_MIN_VOLUME_UAC2), tu_htole16(VOLUME_CTRL_0_DB), tu_htole16(DACAMP_VOLUME_STEP)}};
             TU_LOG1("Get channel %u volume range (%d, %d, %u) dB\r\n", request->bChannelNumber,
-                    range_vol.subrange[0].bMin / 256, range_vol.subrange[0].bMax / 256, range_vol.subrange[0].bRes / 256);
+                    range_vol.subrange[0].bMin, range_vol.subrange[0].bMax, range_vol.subrange[0].bRes);
             return tud_audio_buffer_and_schedule_control_xfer(rhport, (tusb_control_request_t const *)request, &range_vol, sizeof(range_vol));
         }
         else if (request->bRequest == AUDIO_CS_REQ_CUR)
         {
             audio_control_cur_2_t cur_vol = {.bCur = tu_htole16(volume[request->bChannelNumber])};
-            TU_LOG1("Get channel %u volume %d dB\r\n", request->bChannelNumber, cur_vol.bCur / 256);
+            TU_LOG1("Get channel %u volume %d dB\r\n", request->bChannelNumber, cur_vol.bCur);
             return tud_audio_buffer_and_schedule_control_xfer(rhport, (tusb_control_request_t const *)request, &cur_vol, sizeof(cur_vol));
         }
     }
@@ -281,7 +281,7 @@ static bool tud_audio_feature_unit_set_request(uint8_t rhport, audio_control_req
 
         volume[request->bChannelNumber] = ((audio_control_cur_2_t const *)buf)->bCur;
 
-        TU_LOG1("Set channel %d volume: %d dB\r\n", request->bChannelNumber, volume[request->bChannelNumber] / 256);
+        TU_LOG1("Set channel %d volume: %d dB\r\n", request->bChannelNumber, volume[request->bChannelNumber]);
 
         return true;
     }
@@ -390,7 +390,7 @@ void audio_task(void)
 {
     if (spk_data_size && (currentSampleLength == 4 || currentSampleLength == 8))
     {
-        int ret = dacamp_pcm_put(spk_buf, spk_data_size / currentSampleLength, currentSampleLength);
+        int ret = dacamp_pcm_put(spk_buf, spk_data_size / currentSampleLength, currentSampleLength, volume, mute);
     }
 
     spk_data_size = 0;

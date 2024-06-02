@@ -9,6 +9,7 @@
 
 #include "ringbuf.h"
 #include "dsm.h"
+#include "volumeLut.h"
 
 //  undefine to process and init only one channel; 
 // has to be before the inclusion of "hbridge.pio.h"
@@ -146,7 +147,7 @@ void dacamp_flush(void)
     isFlushRequested = true;
 }
 
-int dacamp_pcm_put(uint32_t *samples, int sampleCount, int sampleSize)
+int dacamp_pcm_put(const uint32_t* samples, int sampleCount, int sampleSize, const int16_t *volume, const int8_t *mute)
 {
     if (!isEnabledRequested)
         return sampleCount; //discard
@@ -159,6 +160,15 @@ int dacamp_pcm_put(uint32_t *samples, int sampleCount, int sampleSize)
     uint64_t *samples64 = (uint64_t*)samples;
 
     int32_t sampleLeft, sampleRight;
+
+    int32_t volumeLeft = (int32_t)volume[0] + (int32_t)volume[1], 
+            volumeRight = (int32_t)volume[0] + (int32_t)volume[2];
+
+    int32_t volumeIndexLeft = (-volumeLeft) >> DACAMP_VOLUME_STEP_BITS,
+            volumeIndexRight = (-volumeRight) >> DACAMP_VOLUME_STEP_BITS;
+
+    int32_t muteLeft = mute[0] || mute[1] || volumeLeft <= DACAMP_MIN_VOLUME_UAC2, 
+            muteRight = mute[0] || mute[2] || volumeRight <= DACAMP_MIN_VOLUME_UAC2;
 
     while (sampleCount > 0)
     {
@@ -181,9 +191,22 @@ int dacamp_pcm_put(uint32_t *samples, int sampleCount, int sampleSize)
                 sampleRight = DSM_INT24_TO_INT32(_DACAMP_PCM24_RIGHT(sample));
             }
 
-            //volumize
+            //volume and mute
+            if (!muteLeft)
+            {
+                sampleLeft *= volumeLutNumerator[volumeIndexLeft];
+                sampleLeft /= volumeLutDenominator[volumeIndexLeft];
+            }
+            else
+                sampleLeft = 0;
 
-            //
+            if (!muteRight)
+            {
+                sampleRight *= volumeLutNumerator[volumeIndexRight];
+                sampleRight /= volumeLutDenominator[volumeIndexRight];
+            }
+            else
+                sampleRight = 0;
 
             pcmToDsmPcmBuffer[i] = _DACAMP_DSM_PCM(sampleLeft, sampleRight);
         }
