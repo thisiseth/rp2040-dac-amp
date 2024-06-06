@@ -34,6 +34,7 @@
 #include "pico/stdlib.h"
 
 #include "dacamp.h"
+#include "hardware/watchdog.h"
 
 // List of supported sample rates
 const uint32_t sample_rates[] = {48000, /* 44100, 88200,*/ 96000};
@@ -107,6 +108,11 @@ int main(void)
     tud_init(BOARD_TUD_RHPORT);
 
     TU_LOG1("Headset running\r\n");
+
+    if (watchdog_caused_reboot())
+    {
+        TU_LOG1("Was reset by the watchdog\r\n");
+    }
 
     while (1)
     {
@@ -336,6 +342,7 @@ bool tud_audio_set_itf_close_EP_cb(uint8_t rhport, tusb_control_request_t const 
     uint8_t const itf = tu_u16_low(tu_le16toh(p_request->wIndex));
     uint8_t const alt = tu_u16_low(tu_le16toh(p_request->wValue));
 
+    TU_LOG1("Close interface %d alt %d\r\n", itf, alt);
     if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt == 0)
     {
         blink_interval_ms = BLINK_MOUNTED;
@@ -354,7 +361,7 @@ bool tud_audio_set_itf_cb(uint8_t rhport, tusb_control_request_t const *p_reques
     uint8_t const itf = tu_u16_low(tu_le16toh(p_request->wIndex));
     uint8_t const alt = tu_u16_low(tu_le16toh(p_request->wValue));
 
-    TU_LOG2("Set interface %d alt %d\r\n", itf, alt);
+    TU_LOG1("Set interface %d alt %d\r\n", itf, alt);
     if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt != 0)
     {
         blink_interval_ms = BLINK_STREAMING;

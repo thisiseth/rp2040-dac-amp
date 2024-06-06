@@ -6,6 +6,7 @@
 #include "pico/multicore.h"
 #include "pico/sync.h"
 #include "pico/platform.h"
+#include "hardware/watchdog.h"
 
 #include "ringbuf.h"
 #include "dsm.h"
@@ -248,6 +249,8 @@ static void core1_worker(void)
 
     uint64_t pioSample[2];
 
+    watchdog_enable(500, 1); // 500ms without samples 
+
     while (1) {
         isEnabled = isEnabledRequested;
 
@@ -292,7 +295,10 @@ static void core1_worker(void)
         }
 
         if (!isEnabledActual)
+        {
+            watchdog_update();
             continue;
+        }
 
         if (refillBuffers && ringbuf_is_full(&pioRing))
             refillBuffers = false;
@@ -338,6 +344,9 @@ static inline bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bo
 
         spin_unlock(pcmSpinlock, irq);
 
+        if (success)
+            watchdog_update();
+
         if (!success && doNotRepeatPrevious)
             return false;
 
@@ -365,6 +374,9 @@ static inline bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bo
         bool success = ringbuf_get_one(&pcmRing, &lastPcm);
 
         spin_unlock(pcmSpinlock, irq);
+
+        if (success)
+            watchdog_update();
 
         if (!success && doNotRepeatPrevious)
             return false;
