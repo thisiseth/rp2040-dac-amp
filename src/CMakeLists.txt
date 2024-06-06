@@ -33,9 +33,11 @@ target_link_libraries(rp2040_dac_amp PUBLIC
     tinyusb_device 
     tinyusb_board
     hardware_pio
+    hardware_dma
     pico_multicore 
     pico_sync
     pico_platform
+    pico_rand
 )
 
 pico_set_binary_type(rp2040_dac_amp copy_to_ram)

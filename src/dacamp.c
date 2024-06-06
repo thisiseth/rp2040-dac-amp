@@ -10,6 +10,7 @@
 #include "ringbuf.h"
 #include "dsm.h"
 #include "volumeLut.h"
+#include "roscRandom.h"
 
 //  undefine to process and init only one channel; 
 // has to be before the inclusion of "hbridge.pio.h"
@@ -232,7 +233,8 @@ static void core1_worker(void)
 {
     uint offset = pio_add_program(PIO, &hbridge_program);
 
-    if (!hbridge_program_init(PIO, SM_LEFT, SM_RIGHT, offset, HBRIDGE_LEFT_START_PIN, HBRIDGE_RIGHT_START_PIN))
+    if (!hbridge_program_init(PIO, SM_LEFT, SM_RIGHT, offset, HBRIDGE_LEFT_START_PIN, HBRIDGE_RIGHT_START_PIN) ||
+        !rosc_random_init())
         dacamp_panic();
 
     bool isEnabled, sampleRate96k;
@@ -341,16 +343,16 @@ static inline bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bo
 
         if (success)
         {
-            *outSampleL = dsm_process_sample_x16(&dsmLeft, _DACAMP_DSM_PCM_LEFT(firstPcm), _DACAMP_DSM_PCM_LEFT(lastPcm));
+            *outSampleL = dsm_process_sample_x16(&dsmLeft, _DACAMP_DSM_PCM_LEFT(firstPcm), _DACAMP_DSM_PCM_LEFT(lastPcm), (uint32_t)rosc_random_get());
 #ifdef HBRIDGE_STEREO
-            *outSampleR = dsm_process_sample_x16(&dsmRight, _DACAMP_DSM_PCM_RIGHT(firstPcm), _DACAMP_DSM_PCM_RIGHT(lastPcm));
+            *outSampleR = dsm_process_sample_x16(&dsmRight, _DACAMP_DSM_PCM_RIGHT(firstPcm), _DACAMP_DSM_PCM_RIGHT(lastPcm), (uint32_t)rosc_random_get());
 #endif
         }
         else 
         {
-            *outSampleL = dsm_process_sample_x32(&dsmLeft, _DACAMP_DSM_PCM_LEFT(lastPcm));
+            *outSampleL = dsm_process_sample_x32(&dsmLeft, _DACAMP_DSM_PCM_LEFT(lastPcm), (uint32_t)rosc_random_get());
 #ifdef HBRIDGE_STEREO
-            *outSampleR = dsm_process_sample_x32(&dsmRight, _DACAMP_DSM_PCM_RIGHT(lastPcm));
+            *outSampleR = dsm_process_sample_x32(&dsmRight, _DACAMP_DSM_PCM_RIGHT(lastPcm), (uint32_t)rosc_random_get());
 #endif
         }
 
@@ -367,9 +369,9 @@ static inline bool process_sample(uint64_t *outSampleL, uint64_t *outSampleR, bo
         if (!success && doNotRepeatPrevious)
             return false;
 
-        *outSampleL = dsm_process_sample_x32(&dsmLeft, _DACAMP_DSM_PCM_LEFT(lastPcm));
+        *outSampleL = dsm_process_sample_x32(&dsmLeft, _DACAMP_DSM_PCM_LEFT(lastPcm), (uint32_t)rosc_random_get());
 #ifdef HBRIDGE_STEREO
-        *outSampleR = dsm_process_sample_x32(&dsmRight, _DACAMP_DSM_PCM_RIGHT(lastPcm));
+        *outSampleR = dsm_process_sample_x32(&dsmRight, _DACAMP_DSM_PCM_RIGHT(lastPcm), (uint32_t)rosc_random_get());
 #endif
 
         return true;

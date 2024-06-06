@@ -14,7 +14,11 @@
 
 #define _DSM_INT_MAX                (0x7FFF << 8)
 #define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time (?)
-#define _DSM_ZERO_THRESHOLD         ((int32_t)0x00000000)
+#define _DSM_ZERO_THRESHOLD         ((int32_t)0x00000000) //proper three-state quantizing needs more careful implementation to be useful
+
+#define _DSM_DITHER_MSB             9
+#define _DSM_DITHER_GARBAGE_1(bits) (((int32_t)(bits)) >> (31 - _DSM_DITHER_MSB)) //use top half
+#define _DSM_DITHER_GARBAGE_2(bits) _DSM_DITHER_GARBAGE_1(bits << 16) //use bottom half
 
 typedef struct dsm
 {
@@ -132,12 +136,12 @@ static inline uint32_t _dsm_calculate(dsm_t* ptr, int32_t input)
     return dsmOutput;
 }
 
-static uint64_t dsm_process_sample_x32(dsm_t* ptr, int32_t dsmPcm)
+static uint64_t dsm_process_sample_x32(dsm_t* ptr, int32_t dsmPcm, uint32_t randomBits)
 {
     uint32_t retLow = 0, retHigh = 0;
 
     //linear interpolation with 1 sample delay
-    int32_t sample = ptr->prevSample;
+    int32_t sample = ptr->prevSample + _DSM_DITHER_GARBAGE_1(randomBits);
     int32_t step = (dsmPcm - sample) >> 5; // / 32
 
     ptr->prevSample = dsmPcm;
@@ -154,6 +158,8 @@ static uint64_t dsm_process_sample_x32(dsm_t* ptr, int32_t dsmPcm)
         sample += step;
     }
 
+    sample += _DSM_DITHER_GARBAGE_2(randomBits) - _DSM_DITHER_GARBAGE_1(randomBits); //switch garbage
+
     retLow |= _dsm_calculate(ptr, sample);
     sample += step;
 
@@ -169,12 +175,12 @@ static uint64_t dsm_process_sample_x32(dsm_t* ptr, int32_t dsmPcm)
     return ((uint64_t)retHigh) << 32 | retLow;
 }
 
-static uint64_t dsm_process_sample_x16(dsm_t* ptr, int32_t firstDsmPcm, int32_t secondDsmPcm)
+static uint64_t dsm_process_sample_x16(dsm_t* ptr, int32_t firstDsmPcm, int32_t secondDsmPcm, uint32_t randomBits)
 {
     uint32_t retLow = 0, retHigh = 0;
 
     //linear interpolation with 1 sample delay
-    int32_t sample = ptr->prevSample;
+    int32_t sample = ptr->prevSample + _DSM_DITHER_GARBAGE_1(randomBits);
     int32_t step = (firstDsmPcm - sample) >> 4; // / 16
 
     ptr->prevSample = secondDsmPcm;
@@ -191,7 +197,7 @@ static uint64_t dsm_process_sample_x16(dsm_t* ptr, int32_t firstDsmPcm, int32_t 
         sample += step;
     }
 
-    sample = firstDsmPcm;
+    sample = firstDsmPcm + _DSM_DITHER_GARBAGE_2(randomBits);
     step = (secondDsmPcm - sample) >> 4; // / 16
 
     retLow |= _dsm_calculate(ptr, sample);
