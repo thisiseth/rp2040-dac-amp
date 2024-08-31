@@ -246,7 +246,7 @@ static bool tud_audio_feature_unit_get_request(uint8_t rhport, audio_control_req
             audio_control_range_2_n_t(1) range_vol = {
                 .wNumSubRanges = tu_htole16(1),
                 .subrange[0] = {.bMin = tu_htole16(DACAMP_MIN_VOLUME_UAC2), tu_htole16(VOLUME_CTRL_0_DB), tu_htole16(DACAMP_VOLUME_STEP)}};
-            TU_LOG1("Get channel %u volume range (%d, %d, %u) dB\r\n", request->bChannelNumber,
+            TU_LOG1("Get channel %u volume range (%d, %d, %u)\r\n", request->bChannelNumber,
                     range_vol.subrange[0].bMin, range_vol.subrange[0].bMax, range_vol.subrange[0].bRes);
             return tud_audio_buffer_and_schedule_control_xfer(rhport, (tusb_control_request_t const *)request, &range_vol, sizeof(range_vol));
         }
@@ -287,7 +287,7 @@ static bool tud_audio_feature_unit_set_request(uint8_t rhport, audio_control_req
 
         volume[request->bChannelNumber] = ((audio_control_cur_2_t const *)buf)->bCur;
 
-        TU_LOG1("Set channel %d volume: %d dB\r\n", request->bChannelNumber, volume[request->bChannelNumber]);
+        TU_LOG1("Set channel %d volume: %d\r\n", request->bChannelNumber, volume[request->bChannelNumber]);
 
         return true;
     }
@@ -342,7 +342,7 @@ bool tud_audio_set_itf_close_EP_cb(uint8_t rhport, tusb_control_request_t const 
     uint8_t const itf = tu_u16_low(tu_le16toh(p_request->wIndex));
     uint8_t const alt = tu_u16_low(tu_le16toh(p_request->wValue));
 
-    TU_LOG1("Close interface %d alt %d\r\n", itf, alt);
+    TU_LOG1("Close interface EP %d alt %d\r\n", itf, alt);
     if (ITF_NUM_AUDIO_STREAMING_SPK == itf && alt == 0)
     {
         blink_interval_ms = BLINK_MOUNTED;

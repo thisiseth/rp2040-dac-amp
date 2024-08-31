@@ -16,9 +16,14 @@
 #define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time (?)
 #define _DSM_ZERO_THRESHOLD         ((int32_t)0x00000000) //proper three-state quantizing needs more careful implementation to be useful
 
-#define _DSM_DITHER_MSB             9
-#define _DSM_DITHER_GARBAGE_1(bits) (((int32_t)(bits)) >> (31 - _DSM_DITHER_MSB)) //use top half
-#define _DSM_DITHER_GARBAGE_2(bits) _DSM_DITHER_GARBAGE_1(bits << 16) //use bottom half
+#if 1
+    #define _DSM_DITHER_MSB             6
+    #define _DSM_DITHER_GARBAGE_1(bits) (((int32_t)(bits)) >> (31 - _DSM_DITHER_MSB)) //use top half
+    #define _DSM_DITHER_GARBAGE_2(bits) _DSM_DITHER_GARBAGE_1(bits << 16) //use bottom half
+#else
+    #define _DSM_DITHER_GARBAGE_1(bits) (0)
+    #define _DSM_DITHER_GARBAGE_2(bits) (0)
+#endif
 
 typedef struct dsm
 {
