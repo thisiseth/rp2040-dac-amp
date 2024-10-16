@@ -2,7 +2,7 @@
 
 ;192mhz = 48k * 32 (oversample) * 25 (PIO period) * 5 (PIO divider)
 .define public T_PULSE_CLOCKS 25
-.define public T_DEAD_CLOCKS 3 ;lower dead-time gives me a bit less noise, but mosfets get dangerously hot
+.define public T_DEAD_CLOCKS 4 ;lower dead-time gives me a bit less noise, but mosfets get dangerously hot
 .define public T_ACTIVE_CLOCKS T_PULSE_CLOCKS - T_DEAD_CLOCKS
 
 ;           out pins:  3210

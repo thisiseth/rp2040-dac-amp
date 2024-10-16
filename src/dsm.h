@@ -13,7 +13,7 @@
 #define DSM_INT24_TO_INT32(a)       ((((int32_t)(a)) * 45) >> 6)
 
 #define _DSM_INT_MAX                (0x7FFF << 8)
-#define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 7) / 8) //minus dead time (?)
+#define _DSM_INT_MAX_SHORT_PULSE    ((_DSM_INT_MAX * 21) / 25) //minus dead time (?)
 #define _DSM_ZERO_THRESHOLD         ((int32_t)0x00000000) //proper three-state quantizing needs more careful implementation to be useful
 
 #if 1
@@ -154,7 +154,7 @@ static uint64_t dsm_process_sample_x32(dsm_t* ptr, int32_t dsmPcm, uint32_t rand
     retHigh |= _dsm_calculate(ptr, sample);
     sample += step;
 
-#pragma GCC unroll 15
+#pragma GCC unroll 16
     for (int i = 0; i < 15; ++i)
     {
         retHigh <<= 2;
@@ -168,7 +168,7 @@ static uint64_t dsm_process_sample_x32(dsm_t* ptr, int32_t dsmPcm, uint32_t rand
     retLow |= _dsm_calculate(ptr, sample);
     sample += step;
 
-#pragma GCC unroll 15
+#pragma GCC unroll 16
     for (int i = 0; i < 15; ++i)
     {
         retLow <<= 2;
@@ -193,7 +193,7 @@ static uint64_t dsm_process_sample_x16(dsm_t* ptr, int32_t firstDsmPcm, int32_t 
     retHigh |= _dsm_calculate(ptr, sample);
     sample += step;
 
-#pragma GCC unroll 15
+#pragma GCC unroll 16
     for (int i = 0; i < 15; ++i)
     {
         retHigh <<= 2;
@@ -208,7 +208,7 @@ static uint64_t dsm_process_sample_x16(dsm_t* ptr, int32_t firstDsmPcm, int32_t 
     retLow |= _dsm_calculate(ptr, sample);
     sample += step;
 
-#pragma GCC unroll 15
+#pragma GCC unroll 16
     for (int i = 0; i < 15; ++i)
     {
         retLow <<= 2;
